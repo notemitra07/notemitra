@@ -5,9 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/context/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Mail, Lock, User, Chrome, GraduationCap, Eye, EyeOff } from 'lucide-react';
-
-const ALLOWED_EMAIL_DOMAIN = '@mictech.edu.in';
+import { Mail, Lock, User, Chrome, GraduationCap, Eye, EyeOff, Briefcase, Hash } from 'lucide-react';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -17,23 +15,22 @@ export default function SignUpPage() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'student',
     branch: '',
     section: '',
     rollNo: '',
+    designation: '',
+    department: '',
+    employeeId: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return false;
-    }
-    return email.toLowerCase().endsWith(ALLOWED_EMAIL_DOMAIN);
-  };
+  const email = formData.email.trim().toLowerCase();
+  const isStudent = email.endsWith('@mictech.edu.in') || email.endsWith('@mic.tech.edu');
+  const isFaculty = email.endsWith('@mictech.ac.in') || email.endsWith('@mic.tech.ac.in');
+  const isValidEmail = isStudent || isFaculty;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -43,14 +40,8 @@ export default function SignUpPage() {
     e.preventDefault();
     setError('');
 
-    // Validate email domain
-    if (!validateEmail(formData.email)) {
-      setError(`Please use your college email ending with ${ALLOWED_EMAIL_DOMAIN}`);
-      return;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+    if (!isValidEmail) {
+      setError('Please use a valid college email ending with @mictech.edu.in or @mictech.ac.in');
       return;
     }
 
@@ -59,23 +50,62 @@ export default function SignUpPage() {
       return;
     }
 
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    const signupData: any = {
+      name: formData.name,
+      email: formData.email.toLowerCase().trim(),
+      password: formData.password,
+    };
+
+    if (isStudent) {
+      if (!formData.branch) {
+        setError('Please select a branch');
+        return;
+      }
+      if (!formData.rollNo) {
+        setError('Please enter your roll number');
+        return;
+      }
+      signupData.role = 'student';
+      signupData.branch = formData.branch;
+      signupData.rollNo = formData.rollNo;
+      signupData.section = formData.section || undefined;
+    } else if (isFaculty) {
+      if (!formData.designation) {
+        setError('Please enter your designation');
+        return;
+      }
+      if (!formData.department) {
+        setError('Please select a department');
+        return;
+      }
+      if (!formData.employeeId) {
+        setError('Please enter your ID number');
+        return;
+      }
+      if (!/^\d{4}$/.test(formData.employeeId)) {
+        setError('ID Number must be exactly 4 digits');
+        return;
+      }
+      signupData.role = 'faculty';
+      signupData.designation = formData.designation;
+      signupData.department = formData.department;
+      signupData.employeeId = formData.employeeId;
+    }
+
     setLoading(true);
 
     try {
-      await signup({
-        name: formData.name,
-        email: formData.email.toLowerCase(),
-        password: formData.password,
-        role: formData.role,
-        branch: formData.branch || undefined,
-        section: formData.section || undefined,
-        rollNo: formData.rollNo || undefined,
-      });
+      await signup(signupData);
       router.push('/browse');
     } catch (err: unknown) {
       const error = err as { code?: string; message?: string; response?: { data?: { message?: string; error?: string } } };
       if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
-        setError('Cannot connect to server. Please make sure the backend is running on port 5000.');
+        setError('Cannot connect to server. Please make sure the backend is running.');
       } else {
         setError(error.response?.data?.message || error.response?.data?.error || 'Failed to create account. Please try again.');
       }
@@ -92,11 +122,23 @@ export default function SignUpPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-4 py-6 sm:py-12">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-5 sm:p-8">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-5 sm:p-8 transition-all duration-300">
         <div className="text-center mb-5 sm:mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
           <p className="text-sm sm:text-base text-gray-600">Join NoteMitra and start sharing knowledge</p>
         </div>
+
+        {isStudent && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs sm:text-sm font-medium animate-fadeIn">
+            Student account — you will be registered as a student.
+          </div>
+        )}
+
+        {isFaculty && (
+          <div className="mb-4 p-3 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg text-xs sm:text-sm font-medium animate-fadeIn">
+            Faculty account — you will be registered with admin privileges.
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-xs sm:text-sm">
@@ -138,136 +180,279 @@ export default function SignUpPage() {
                 onChange={handleChange}
                 required
                 className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
-                placeholder={`your.name${ALLOWED_EMAIL_DOMAIN}`}
+                placeholder="your.name@mictech.edu.in"
               />
             </div>
-            <p className="mt-1 text-xs text-gray-500">
-              Must end with {ALLOWED_EMAIL_DOMAIN}
+            <p className="mt-1.5 text-xs text-gray-500 font-medium">
+              Students: @mictech.edu.in · Faculty: @mictech.ac.in
             </p>
           </div>
 
-          {/* Branch and Roll No in a row on tablet+ */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <div>
-              <label htmlFor="branch" className="block text-sm font-medium text-gray-700 mb-1">
-                Branch
-              </label>
-              <div className="relative">
-                <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <select
-                  id="branch"
-                  name="branch"
-                  value={formData.branch}
-                  onChange={handleChange}
-                  required
-                  className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white text-sm sm:text-base"
-                >
-                  <option value="">Select Branch</option>
-                  <option value="CSE">CSE</option>
-                  <option value="AIML">AIML</option>
-                  <option value="AIDS">AIDS</option>
-                  <option value="ECE">ECE</option>
-                  <option value="EEE">EEE</option>
-                  <option value="IT">IT</option>
-                  <option value="CIVIL">CIVIL</option>
-                  <option value="MECHANICAL">MECHANICAL</option>
-                </select>
-              </div>
-            </div>
+          {/* Student Specific Fields */}
+          {isStudent && (
+            <div className="space-y-3 sm:space-y-4 transition-all duration-300">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label htmlFor="branch" className="block text-sm font-medium text-gray-700 mb-1">
+                    Branch
+                  </label>
+                  <div className="relative">
+                    <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <select
+                      id="branch"
+                      name="branch"
+                      value={formData.branch}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white text-sm sm:text-base"
+                    >
+                      <option value="">Select Branch</option>
+                      <option value="CSE">CSE</option>
+                      <option value="AIML">AIML</option>
+                      <option value="AIDS">AIDS</option>
+                      <option value="ECE">ECE</option>
+                      <option value="EEE">EEE</option>
+                      <option value="IT">IT</option>
+                      <option value="CIVIL">CIVIL</option>
+                      <option value="MECHANICAL">MECHANICAL</option>
+                    </select>
+                  </div>
+                </div>
 
-            <div>
-              <label htmlFor="rollNo" className="block text-sm font-medium text-gray-700 mb-1">
-                Roll No
-              </label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <div>
+                  <label htmlFor="rollNo" className="block text-sm font-medium text-gray-700 mb-1">
+                    Roll No
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="rollNo"
+                      name="rollNo"
+                      type="text"
+                      value={formData.rollNo}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="24H71A6132"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="section" className="block text-sm font-medium text-gray-700 mb-1">
+                  Section (Optional)
+                </label>
                 <input
-                  id="rollNo"
-                  name="rollNo"
+                  id="section"
+                  name="section"
                   type="text"
-                  value={formData.rollNo}
+                  value={formData.section}
                   onChange={handleChange}
-                  required
-                  className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
-                  placeholder="24H71A6132"
+                  className="w-full px-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                  placeholder="A"
                 />
               </div>
-            </div>
-          </div>
 
-          <div>
-            <label htmlFor="section" className="block text-sm font-medium text-gray-700 mb-1">
-              Section (Optional)
-            </label>
-            <input
-              id="section"
-              name="section"
-              type="text"
-              value={formData.section}
-              onChange={handleChange}
-              className="w-full px-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
-              placeholder="A"
-            />
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
 
-          {/* Password fields in a row on tablet+ */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={formData.password}
-                  onChange={handleChange}
-                  required
-                  className="w-full pl-10 pr-12 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
+                <div>
+                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
+          )}
 
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  required
-                  className="w-full pl-10 pr-12 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                >
-                  {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
+          {/* Faculty Specific Fields */}
+          {isFaculty && (
+            <div className="space-y-3 sm:space-y-4 transition-all duration-300">
+              <div>
+                <label htmlFor="designation" className="block text-sm font-medium text-gray-700 mb-1">
+                  Designation
+                </label>
+                <div className="relative">
+                  <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <input
+                    id="designation"
+                    name="designation"
+                    type="text"
+                    value={formData.designation}
+                    onChange={handleChange}
+                    required
+                    className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                    placeholder="Assistant Professor"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label htmlFor="department" className="block text-sm font-medium text-gray-700 mb-1">
+                    Department
+                  </label>
+                  <div className="relative">
+                    <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <select
+                      id="department"
+                      name="department"
+                      value={formData.department}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white text-sm sm:text-base"
+                    >
+                      <option value="">Select Department</option>
+                      <option value="CSE">CSE</option>
+                      <option value="AIML">AIML</option>
+                      <option value="AIDS">AIDS</option>
+                      <option value="ECE">ECE</option>
+                      <option value="EEE">EEE</option>
+                      <option value="IT">IT</option>
+                      <option value="CIVIL">CIVIL</option>
+                      <option value="MECHANICAL">MECHANICAL</option>
+                      <option value="BS&H">BS&H</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="employeeId" className="block text-sm font-medium text-gray-700 mb-1">
+                    ID Number <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="employeeId"
+                      name="employeeId"
+                      type="text"
+                      value={formData.employeeId}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="# 1234"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Exactly 4 digits
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          <Button type="submit" className="w-full py-2.5 sm:py-2" size="lg" disabled={loading}>
-            {loading ? 'Creating Account...' : 'Create Account'}
-          </Button>
+          {!isValidEmail ? (
+            <button
+              type="button"
+              disabled
+              className="w-full py-3 sm:py-2.5 border border-transparent rounded-lg text-sm sm:text-base font-semibold text-blue-400 bg-blue-50 cursor-not-allowed transition-all duration-300 text-center block"
+            >
+              Enter a valid college email to continue
+            </button>
+          ) : (
+            <Button type="submit" className="w-full py-3 sm:py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base" size="lg" disabled={loading}>
+              {loading ? 'Creating Account...' : isStudent ? 'Create Student Account' : 'Create Faculty Account'}
+            </Button>
+          )}
         </form>
 
         <div className="mt-6">
@@ -283,7 +468,7 @@ export default function SignUpPage() {
           <Button
             type="button"
             variant="outline"
-            className="w-full mt-4"
+            className="w-full mt-4 py-2.5 border border-gray-300 text-gray-700 font-semibold"
             size="lg"
             onClick={handleGoogleSignUp}
           >
@@ -294,7 +479,7 @@ export default function SignUpPage() {
 
         <p className="mt-6 text-center text-sm text-gray-600">
           Already have an account?{' '}
-          <Link href="/auth/signin" className="text-blue-600 hover:text-blue-700 font-medium">
+          <Link href="/auth/signin" className="text-blue-600 hover:text-blue-700 font-semibold">
             Sign In
           </Link>
         </p>

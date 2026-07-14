@@ -11,10 +11,8 @@ import {
   Download,
   RotateCw,
   FileText,
-  ExternalLink,
   Bot,
   Sparkles,
-  RefreshCw,
   AlertCircle
 } from 'lucide-react';
 import { notesAPI } from '@/lib/api';
@@ -48,12 +46,8 @@ export default function PDFPreviewPage() {
   
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
-  const [originalPdfUrl, setOriginalPdfUrl] = useState<string | null>(null);
-  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState(false);
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
-  const [viewerType, setViewerType] = useState<'google' | 'office' | 'pdfjs'>('google');
-  const [retryCount, setRetryCount] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   
   // AI Chat state
@@ -63,60 +57,13 @@ export default function PDFPreviewPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [queriesLeft, setQueriesLeft] = useState(30);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Build viewer URL - Google Docs Viewer renders PDF without downloading
-  const buildViewerUrl = useCallback((rawUrl: string, type: 'google' | 'office' | 'pdfjs') => {
-    const encodedUrl = encodeURIComponent(rawUrl);
-    switch (type) {
-      case 'google':
-        // Google Docs Viewer - most reliable, works on all devices
-        return `https://docs.google.com/gview?url=${encodedUrl}&embedded=true`;
-      case 'office':
-        // Office Online Viewer - good alternative
-        return `https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`;
-      case 'pdfjs':
-        // Mozilla PDF.js - smooth zoom/scroll but slower to load
-        return `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodedUrl}`;
-      default:
-        return `https://docs.google.com/gview?url=${encodedUrl}&embedded=true`;
-    }
-  }, []);
 
   // Fetch note details on mount
   useEffect(() => {
     if (noteId) {
       fetchNoteDetails();
     }
-    
-    return () => {
-      if (loadTimeoutRef.current) {
-        clearTimeout(loadTimeoutRef.current);
-      }
-    };
   }, [noteId]);
-
-  // Build viewer URL when originalPdfUrl or viewerType changes
-  useEffect(() => {
-    if (originalPdfUrl) {
-      const url = buildViewerUrl(originalPdfUrl, viewerType);
-      setViewerUrl(url);
-      setPdfLoading(true);
-      setPdfError(false);
-      
-      // Set timeout for loading - auto-switch viewer if too slow
-      if (loadTimeoutRef.current) {
-        clearTimeout(loadTimeoutRef.current);
-      }
-      loadTimeoutRef.current = setTimeout(() => {
-        if (pdfLoading && retryCount < 2) {
-          console.log('Viewer timeout, switching to next viewer');
-          handleSwitchViewer();
-        }
-      }, 20000); // 20 second timeout
-    }
-  }, [originalPdfUrl, viewerType, buildViewerUrl]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -147,21 +94,25 @@ export default function PDFPreviewPage() {
           fetchedNote.id = fetchedNote._id;
         }
         
-        // Get the raw PDF URL
+        // Get the PDF URL - use direct URL (works for localhost)
         let rawPdfUrl = '';
         if (fetchedNote.cloudinaryUrl) {
           rawPdfUrl = fetchedNote.cloudinaryUrl;
         } else if (fetchedNote.fileUrl) {
           rawPdfUrl = fetchedNote.fileUrl;
         } else if (fetchedNote.fileId) {
-          const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+          const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
           rawPdfUrl = `${apiBase}/notes/view-pdf/${fetchedNote.fileId}`;
         }
         
         if (rawPdfUrl) {
-          setOriginalPdfUrl(rawPdfUrl);
+          setPdfUrl(rawPdfUrl);
+        } else {
+          setPdfError(true);
         }
         setNote(fetchedNote);
+      } else {
+        setPdfError(true);
       }
     } catch (error) {
       console.error('Failed to fetch note:', error);
@@ -171,135 +122,56 @@ export default function PDFPreviewPage() {
     }
   };
 
-  const handleIframeLoad = () => {
-    // Clear the timeout
-    if (loadTimeoutRef.current) {
-      clearTimeout(loadTimeoutRef.current);
-    }
-    setPdfLoading(false);
-    setRetryCount(0);
-  };
-
-  const handleIframeError = () => {
-    // Clear the timeout
-    if (loadTimeoutRef.current) {
-      clearTimeout(loadTimeoutRef.current);
-    }
-    
-    // Try next viewer type
-    if (retryCount < 2 && originalPdfUrl) {
-      setRetryCount(prev => prev + 1);
-      handleSwitchViewer();
-    } else {
-      setPdfLoading(false);
-      setPdfError(true);
-    }
-  };
-
-  const handleRetry = () => {
-    if (originalPdfUrl) {
-      setPdfLoading(true);
-      setPdfError(false);
-      setRetryCount(0);
-      // Force refresh by appending timestamp
-      const url = buildViewerUrl(originalPdfUrl + (originalPdfUrl.includes('?') ? '&' : '?') + '_t=' + Date.now(), viewerType);
-      setViewerUrl(url);
-    }
-  };
-
-  const handleSwitchViewer = () => {
-    if (originalPdfUrl) {
-      const viewers: Array<'google' | 'office' | 'pdfjs'> = ['google', 'office', 'pdfjs'];
-      const currentIndex = viewers.indexOf(viewerType);
-      const nextType = viewers[(currentIndex + 1) % viewers.length];
-      setViewerType(nextType);
-      setRetryCount(prev => prev + 1);
-    }
-  };
-
-  // Download PDF properly - ensures PDF format on all devices
+  // Download PDF
   const handleDownload = async () => {
-    if (!originalPdfUrl || !note || isDownloading) return;
+    if (!pdfUrl || !note || isDownloading) return;
     
     setIsDownloading(true);
     
     try {
-      // Prepare filename with .pdf extension
-      let filename = note.fileName || `${note.title}.pdf` || 'document.pdf';
+      let filename = note.fileName || `${note.title}.pdf`;
       if (!filename.toLowerCase().endsWith('.pdf')) {
         filename = filename + '.pdf';
       }
-      // Sanitize filename
       filename = filename.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_');
       
-      console.log('📥 Starting download:', filename);
-      
-      // Fetch the PDF as blob
-      const response = await fetch(originalPdfUrl, {
+      const response = await fetch(pdfUrl, {
         method: 'GET',
         mode: 'cors',
         credentials: 'omit',
-        headers: {
-          'Accept': 'application/pdf,application/octet-stream,*/*'
-        }
+        headers: { 'Accept': 'application/pdf,application/octet-stream,*/*' }
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
-      // Get the blob data
       const arrayBuffer = await response.arrayBuffer();
-      
-      // Create a proper PDF blob with explicit MIME type
       const pdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
-      
-      // Create object URL
       const blobUrl = URL.createObjectURL(pdfBlob);
       
-      // Create download link
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = filename;
-      link.type = 'application/pdf';
       link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
-      
-      // Add to DOM
       document.body.appendChild(link);
-      
-      // Trigger download - use click() for all devices
       link.click();
       
-      // Cleanup after delay
       setTimeout(() => {
-        if (link.parentNode) {
-          document.body.removeChild(link);
-        }
+        if (link.parentNode) document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl);
       }, 15000);
       
-      console.log('✅ Download triggered successfully');
-      
-      // Track download in database
       try {
         const downloadNoteId = note._id || note.id || noteId;
         await notesAPI.trackDownload(String(downloadNoteId));
-        console.log('✅ Download tracked');
-      } catch (trackError) {
-        console.log('Track download failed:', trackError);
-      }
+      } catch {}
       
     } catch (error) {
       console.error('Download error:', error);
-      
-      // Fallback: Try opening in new tab
       try {
-        const newWindow = window.open(originalPdfUrl, '_blank');
-        if (!newWindow) {
-          alert('Download blocked. Please allow popups and try again, or use "Open in New Tab".');
-        }
+        const newWindow = window.open(pdfUrl, '_blank');
+        if (!newWindow) alert('Please allow popups and try again.');
       } catch {
-        alert('Download failed. Please try "Open in New Tab" option.');
+        alert('Download failed. Please try opening in a new tab.');
       }
     } finally {
       setIsDownloading(false);
@@ -322,14 +194,9 @@ export default function PDFPreviewPage() {
     setQueriesLeft(prev => prev - 1);
 
     try {
-      console.log('🤖 Sending message to Chat API...');
-      
-      // Call our Next.js API route (avoids CORS issues with Groq)
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
             ...messages.filter(m => m.id !== 'welcome').map(m => ({
@@ -346,28 +213,20 @@ export default function PDFPreviewPage() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Chat API response received');
-        const assistantMessage: ChatMessage = {
+        setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: data.content || 'Sorry, I could not generate a response.',
           timestamp: new Date()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+        }]);
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('❌ Chat API error:', response.status, errorData);
-        throw new Error(errorData.error || `API error: ${response.status}`);
+        throw new Error(`API error: ${response.status}`);
       }
     } catch (error) {
-      console.error('❌ AI Chat error:', error);
-      const errorMessage = error instanceof Error && error.message === 'AI service not configured'
-        ? 'AI service is not configured. Please contact the administrator.'
-        : 'Sorry, I encountered an error. Please try again.';
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: errorMessage,
+        content: 'Sorry, I encountered an error. Please try again.',
         timestamp: new Date()
       }]);
     } finally {
@@ -375,8 +234,8 @@ export default function PDFPreviewPage() {
     }
   };
 
-  // Error state - no note or PDF
-  if (!loading && (!note || (!originalPdfUrl && !viewerUrl))) {
+  // Error state
+  if (!loading && (!note || pdfError)) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="text-center">
@@ -424,16 +283,16 @@ export default function PDFPreviewPage() {
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-          {/* Viewer Switch Button */}
+          {/* Reload Button */}
           <button
-            onClick={handleSwitchViewer}
+            onClick={() => { if (pdfUrl) { setPdfError(false); setPdfUrl(pdfUrl + ''); } }}
             className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
-            title={`Current: ${viewerType === 'google' ? 'Google Docs' : viewerType === 'office' ? 'Office Online' : 'PDF.js'} - Click to switch`}
+            title="Reload PDF"
           >
-            <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5" />
+            <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
           
-          {/* Download Button - Green, prominent */}
+          {/* Download Button */}
           <button
             onClick={handleDownload}
             disabled={!note || isDownloading}
@@ -464,61 +323,45 @@ export default function PDFPreviewPage() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative" style={{ height: 'calc(100vh - 56px)' }}>
         {/* PDF Viewer */}
         <div className={`flex-1 relative transition-all duration-300 ${showChat ? 'lg:w-[60%]' : 'w-full'}`}>
-          {/* Loading Overlay */}
-          {(loading || pdfLoading) && !pdfError && (
+          {/* Loading State */}
+          {loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
               <div className="text-center p-6">
                 <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
-                <p className="text-white text-lg mb-2">
-                  {loading ? 'Loading document...' : 'Rendering PDF...'}
-                </p>
-                <p className="text-gray-400 text-sm mb-4">
-                  Using {viewerType === 'google' ? 'Google Docs' : viewerType === 'office' ? 'Office Online' : 'PDF.js'} Viewer
-                </p>
-                <p className="text-gray-500 text-xs mb-4">
-                  This may take a few seconds
-                </p>
-                <button
-                  onClick={handleDownload}
-                  disabled={isDownloading}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center gap-2 mx-auto text-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Download Instead
-                </button>
+                <p className="text-white text-lg mb-2">Loading document...</p>
               </div>
             </div>
           )}
-          
+
+          {/* Native PDF embed - works perfectly for localhost */}
+          {!loading && pdfUrl && !pdfError && (
+            <iframe
+              src={pdfUrl}
+              className="w-full border-0 bg-white"
+              title={note?.title || 'PDF Preview'}
+              style={{ height: '100%', width: '100%' }}
+            />
+          )}
+
           {/* Error State */}
-          {pdfError && (
+          {!loading && pdfError && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
               <div className="text-center p-6 max-w-md">
                 <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
                 <p className="text-white text-lg mb-2">Unable to preview PDF</p>
                 <p className="text-gray-400 text-sm mb-6">
-                  The document viewer encountered an issue. Try a different viewer or download the file.
+                  The PDF could not be loaded. You can still download it.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <button
-                    onClick={handleRetry}
+                    onClick={() => fetchNoteDetails()}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition flex items-center gap-2 justify-center"
                   >
                     <RotateCw className="w-4 h-4" />
                     Retry
-                  </button>
-                  <button
-                    onClick={() => {
-                      setRetryCount(0);
-                      handleSwitchViewer();
-                    }}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center gap-2 justify-center"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    Try Different Viewer
                   </button>
                   <button
                     onClick={handleDownload}
@@ -529,34 +372,18 @@ export default function PDFPreviewPage() {
                     Download PDF
                   </button>
                 </div>
-                {originalPdfUrl && (
+                {pdfUrl && (
                   <a
-                    href={originalPdfUrl}
+                    href={pdfUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-4 text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1 justify-center"
                   >
-                    <ExternalLink className="w-4 h-4" />
                     Open in New Tab
                   </a>
                 )}
               </div>
             </div>
-          )}
-          
-          {/* PDF Iframe - Uses embedded viewer (Google Docs/Office/PDF.js) - never direct PDF URL */}
-          {viewerUrl && (
-            <iframe
-              ref={iframeRef}
-              src={viewerUrl}
-              className="w-full h-full border-0 bg-gray-800"
-              title={note?.title || 'PDF Preview'}
-              onLoad={handleIframeLoad}
-              onError={handleIframeError}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-              loading="eager"
-              style={{ minHeight: '100%' }}
-            />
           )}
         </div>
 

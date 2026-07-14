@@ -1,7 +1,7 @@
 @echo off
 title NoteMitra Frontend - Port 3000
 color 0A
-cd /d C:\notemitra1\client
+cd /d "%~dp0"
 echo.
 echo ========================================
 echo   NOTEMITRA FRONTEND STARTING

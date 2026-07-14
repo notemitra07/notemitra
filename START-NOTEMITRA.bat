@@ -8,11 +8,11 @@ echo ========================================
 echo.
 
 echo [1/2] Starting Backend Server (Port 5000)...
-start "" "C:\notemitra1\server\start-server.bat"
+start "" "%~dp0server\start-server.bat"
 timeout /t 3 /nobreak
 
 echo [2/2] Starting Frontend Server (Port 3000)...
-start "" "C:\notemitra1\client\start-frontend.bat"
+start "" "%~dp0client\start-frontend.bat"
 timeout /t 5 /nobreak
 
 echo.

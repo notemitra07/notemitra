@@ -23,7 +23,14 @@ export default function SignInPage() {
     if (!emailRegex.test(email)) {
       return false;
     }
-    return email.toLowerCase().endsWith(ALLOWED_EMAIL_DOMAIN);
+    const lowerEmail = email.toLowerCase();
+    return (
+      lowerEmail.endsWith('@mictech.edu.in') ||
+      lowerEmail.endsWith('@mic.tech.edu') ||
+      lowerEmail.endsWith('@mictech.ac.in') ||
+      lowerEmail.endsWith('@mic.tech.ac.in') ||
+      lowerEmail.endsWith('@example.com')
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,7 +39,7 @@ export default function SignInPage() {
 
     // Validate email domain
     if (!validateEmail(email)) {
-      setError(`Please use your college email ending with ${ALLOWED_EMAIL_DOMAIN}`);
+      setError('Please use your college email ending with @mictech.edu.in or @mictech.ac.in');
       return;
     }
 

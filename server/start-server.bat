@@ -1,7 +1,7 @@
 @echo off
 title NoteMitra Backend - Port 5000
 color 0B
-cd /d C:\notemitra1\server
+cd /d "%~dp0"
 echo.
 echo ========================================
 echo   NOTEMITRA BACKEND STARTING

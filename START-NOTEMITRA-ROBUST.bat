@@ -26,7 +26,7 @@ timeout /t 2 /nobreak >nul
 
 REM Start Backend in new window
 echo Starting Backend Server...
-start "NoteMitra Backend - Port 5000" /MIN cmd /c "cd /d C:\notemitra1\server && color 0B && :loop && node server-enhanced.js && echo Backend crashed! Restarting... && timeout /t 2 /nobreak >nul && goto loop"
+start "NoteMitra Backend - Port 5000" /MIN cmd /c "cd /d %~dp0server && color 0B && :loop && node server-enhanced.js && echo Backend crashed! Restarting... && timeout /t 2 /nobreak >nul && goto loop"
 
 REM Wait for backend to initialize
 echo Waiting for backend to start...
@@ -34,7 +34,7 @@ timeout /t 5 /nobreak >nul
 
 REM Start Frontend in new window  
 echo Starting Frontend Server...
-start "NoteMitra Frontend - Port 3000" /MIN cmd /c "cd /d C:\notemitra1\client && color 0A && :loop && npm run dev && echo Frontend crashed! Restarting... && timeout /t 2 /nobreak >nul && goto loop"
+start "NoteMitra Frontend - Port 3000" /MIN cmd /c "cd /d %~dp0client && color 0A && :loop && npm run dev && echo Frontend crashed! Restarting... && timeout /t 2 /nobreak >nul && goto loop"
 
 REM Wait for frontend to initialize
 echo Waiting for frontend to start...

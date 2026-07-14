@@ -11,11 +11,8 @@ export default function Navbar() {
   const { user, logout, loading } = useAuth();
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    
     // Prefetch common routes for faster navigation
     if (typeof window !== 'undefined') {
       router.prefetch('/browse');
@@ -25,8 +22,8 @@ export default function Navbar() {
     }
   }, [router]);
 
-  // Prevent hydration mismatch by not rendering user-dependent content until mounted
-  const isReady = mounted && !loading;
+  // Show nav items once auth check is done
+  const isReady = !loading;
 
   const closeMobileMenu = () => setMobileMenuOpen(false);
 

@@ -1,5 +1,5 @@
 @echo off
-cd /d c:\notemitra1\client
+cd /d "%~dp0client"
 echo Starting NoteMitra Frontend...
 npm run dev
 pause

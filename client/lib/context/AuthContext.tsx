@@ -29,6 +29,9 @@ interface AuthContextType {
     section?: string;
     branch?: string;
     rollNo?: string;
+    designation?: string;
+    department?: string;
+    employeeId?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -40,11 +43,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    setMounted(true);
     checkAuth();
   }, []);
 
@@ -146,6 +147,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     section?: string;
     branch?: string;
     rollNo?: string;
+    designation?: string;
+    department?: string;
+    employeeId?: string;
   }) => {
     const response = await authAPI.signup(data);
     const { user, token } = response.data;
@@ -187,10 +191,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // During SSR or before hydration, return loading state to prevent mismatch
+  // Provide auth context directly without mounted gate
+  // The loading state from checkAuth() properly reflects the real state
   const contextValue = {
-    user: mounted ? user : null,
-    loading: mounted ? loading : true,
+    user,
+    loading,
     login,
     signup,
     logout,

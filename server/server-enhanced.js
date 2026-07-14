@@ -101,6 +101,8 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
     'http://192.168.1.35:3000',
     'http://192.168.245.192:3000',
     'https://notemitra-mic.vercel.app',
@@ -459,6 +461,9 @@ async function connectMongoDB() {
       branch: String,
       section: String,
       rollNo: String,
+      designation: String,
+      department: String,
+      employeeId: String,
       isAdmin: { type: Boolean, default: false },
       isSuspended: { type: Boolean, default: false },
       totalDownloads: { type: Number, default: 0 },
@@ -660,9 +665,10 @@ app.get('/api/public/stats', async (req, res) => {
 });
 
 // Auth routes
+// Auth routes
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { name, email, password, role, branch, section, rollNo } = req.body;
+    const { name, email, password, role, branch, section, rollNo, designation, department, employeeId } = req.body;
     
     // Validation: Check required fields
     if (!name || name.trim() === '') {
@@ -694,13 +700,15 @@ app.post('/api/auth/signup', async (req, res) => {
     }
     
     // Validate role if provided
-    const validRoles = ['student', 'teacher'];
+    const validRoles = ['student', 'teacher', 'faculty'];
     if (role && !validRoles.includes(role)) {
-      return res.status(400).json({ message: 'Invalid role. Must be student or teacher' });
+      return res.status(400).json({ message: 'Invalid role. Must be student, teacher, or faculty' });
     }
     
+    const normalizedRole = (role === 'teacher' || role === 'faculty') ? 'teacher' : 'student';
+    
     // Check if email is an admin
-    const isAdmin = ADMIN_EMAILS.includes(email);
+    const isAdmin = ADMIN_EMAILS.includes(email) || normalizedRole === 'teacher';
 
     if (useMongoDB) {
       // MongoDB version - optimized with lean() and select() for faster check
@@ -714,10 +722,13 @@ app.post('/api/auth/signup', async (req, res) => {
         name: name.trim(), 
         email: email.toLowerCase().trim(), 
         password, 
-        role: role || 'student', 
+        role: normalizedRole, 
         branch, 
         section, 
         rollNo, 
+        designation,
+        department,
+        employeeId,
         isAdmin, 
         isSuspended: false 
       });
@@ -725,7 +736,19 @@ app.post('/api/auth/signup', async (req, res) => {
       const token = 'dev_token_' + user._id;
       res.status(201).json({
         message: 'User created successfully',
-        user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, rollNo: user.rollNo, isAdmin: user.isAdmin },
+        user: { 
+          id: user._id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          rollNo: user.rollNo,
+          designation: user.designation,
+          department: user.department,
+          employeeId: user.employeeId,
+          isAdmin: user.isAdmin 
+        },
         token
       });
     } else {
@@ -737,13 +760,17 @@ app.post('/api/auth/signup', async (req, res) => {
 
       const user = {
         id: (users.length + 1).toString(),
+        _id: (users.length + 1).toString(),
         name: name.trim(),
         email: email.toLowerCase().trim(),
         password,
-        role: role || 'student',
+        role: normalizedRole,
         branch: branch || '',
         section: section || '',
         rollNo: rollNo || '',
+        designation: designation || '',
+        department: department || '',
+        employeeId: employeeId || '',
         isAdmin,
         isSuspended: false,
         createdAt: new Date()
@@ -753,7 +780,19 @@ app.post('/api/auth/signup', async (req, res) => {
       const token = 'dev_token_' + user.id;
       res.status(201).json({
         message: 'User created successfully',
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, rollNo: user.rollNo, isAdmin: user.isAdmin },
+        user: { 
+          id: user.id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          rollNo: user.rollNo,
+          designation: user.designation,
+          department: user.department,
+          employeeId: user.employeeId,
+          isAdmin: user.isAdmin 
+        },
         token
       });
     }
@@ -2311,6 +2350,22 @@ app.post('/api/notes/upload-pdf', (req, res) => {
   });
 });
 
+// Local file server route to serve local uploads fallback
+app.get('/api/notes/temp-files/:filename', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const filePath = path.join(__dirname, 'uploads', req.params.filename);
+  
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
+    fs.createReadStream(filePath).pipe(res);
+  } else {
+    console.error(`❌ Local file not found: ${filePath}`);
+    res.status(404).json({ message: 'File not found' });
+  }
+});
+
 // Cloudinary PDF Upload endpoint (Primary method)
 app.post('/api/notes/upload-pdf-cloudinary', uploadMemory.single('pdf'), async (req, res) => {
   try {
@@ -2319,24 +2374,61 @@ app.post('/api/notes/upload-pdf-cloudinary', uploadMemory.single('pdf'), async (
     console.log('☁️ CLOUDINARY UPLOAD REQUEST');
     console.log('='.repeat(50));
     
+    // Check if Cloudinary is configured
+    const hasCloudinary = process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET;
+    
     // Debug: Check Cloudinary configuration
     console.log('🔧 Cloudinary Config Check:');
     console.log('   Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ Set' : '❌ MISSING');
     console.log('   API Key:', process.env.CLOUDINARY_API_KEY ? '✅ Set' : '❌ MISSING');
     console.log('   API Secret:', process.env.CLOUDINARY_API_SECRET ? '✅ Set (hidden)' : '❌ MISSING');
-    
-    // Verify Cloudinary is configured
-    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-      console.error('❌ Cloudinary credentials not configured!');
-      return res.status(503).json({ 
-        message: 'File storage not configured. Please contact administrator.',
-        error: 'CLOUDINARY_NOT_CONFIGURED'
-      });
-    }
 
     if (!req.file) {
       console.log('❌ No file in request');
       return res.status(400).json({ message: 'No PDF file provided' });
+    }
+
+    // Validate file type
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ message: 'Only PDF files are allowed' });
+    }
+
+    if (!hasCloudinary) {
+      console.warn('⚠️ Cloudinary credentials not configured. Using local filesystem storage fallback.');
+      
+      const fs = require('fs');
+      const path = require('path');
+      const uploadsDir = path.join(__dirname, 'uploads');
+      
+      // Ensure uploads directory exists
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      const uniqueFilename = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const destPath = path.join(uploadsDir, uniqueFilename);
+      
+      // Save file buffer to local disk
+      fs.writeFileSync(destPath, req.file.buffer);
+      console.log('✅ File saved to local folder:', destPath);
+
+      // Construct local download URL
+      const host = req.get('host');
+      const protocol = req.protocol;
+      const localUrl = `${protocol}://${host}/api/notes/temp-files/${uniqueFilename}`;
+
+      return res.json({
+        success: true,
+        message: 'File uploaded successfully (Local Fallback)',
+        fileUrl: localUrl,
+        url: localUrl,
+        fileId: uniqueFilename,
+        publicId: uniqueFilename,
+        filename: req.file.originalname,
+        size: req.file.size,
+        cloudinaryId: uniqueFilename,
+        cloudinaryUrl: localUrl
+      });
     }
 
     console.log('✅ File received:', req.file.originalname);
@@ -4044,19 +4136,29 @@ app.get('/api/notes/:id/comments', async (req, res) => {
   try {
     const noteId = req.params.id;
 
-    if (!useMongoDB || !Comment) {
-      return res.json({ comments: [] });
+    if (useMongoDB) {
+      if (!Comment) {
+        return res.status(503).json({ message: 'Comment service not initialized' });
+      }
+      if (!mongoose.Types.ObjectId.isValid(noteId)) {
+        return res.status(400).json({ message: 'Invalid note ID' });
+      }
+
+      const commentsList = await Comment.find({ noteId })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return res.json({ comments: commentsList });
+    } else {
+      // In-memory fallback
+      if (!global.commentsInMemory) {
+        global.commentsInMemory = [];
+      }
+      const noteComments = global.commentsInMemory
+        .filter(c => String(c.noteId) === String(noteId))
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      return res.json({ comments: noteComments });
     }
-
-    if (!mongoose.Types.ObjectId.isValid(noteId)) {
-      return res.status(400).json({ message: 'Invalid note ID' });
-    }
-
-    const comments = await Comment.find({ noteId })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    res.json({ comments });
   } catch (error) {
     console.error('Get comments error:', error);
     res.status(500).json({ message: 'Failed to fetch comments' });
@@ -4083,45 +4185,68 @@ app.post('/api/notes/:id/comments', async (req, res) => {
       return res.status(400).json({ message: 'Comment too long (max 1000 characters)' });
     }
 
-    if (!useMongoDB) {
-      return res.status(503).json({ message: 'Database not available' });
-    }
-
-    if (!Comment) {
-      return res.status(503).json({ message: 'Comment service not initialized' });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(noteId) || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid ID format' });
-    }
-
-    // Get user info
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Create and save comment
-    const comment = new Comment({
-      noteId,
-      userId,
-      userName: user.name,
-      text: text.trim()
-    });
-
-    await comment.save();
-
-    res.status(201).json({ 
-      message: 'Comment added',
-      comment: {
-        _id: comment._id,
-        noteId: comment.noteId,
-        userId: comment.userId,
-        userName: comment.userName,
-        text: comment.text,
-        createdAt: comment.createdAt
+    if (useMongoDB) {
+      if (!Comment) {
+        return res.status(503).json({ message: 'Comment service not initialized' });
       }
-    });
+      if (!mongoose.Types.ObjectId.isValid(noteId) || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ message: 'Invalid ID format' });
+      }
+
+      // Get user info
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      // Create and save comment
+      const comment = new Comment({
+        noteId,
+        userId,
+        userName: user.name,
+        text: text.trim()
+      });
+
+      await comment.save();
+
+      return res.status(201).json({ 
+        message: 'Comment added',
+        comment: {
+          _id: comment._id,
+          noteId: comment.noteId,
+          userId: comment.userId,
+          userName: comment.userName,
+          text: comment.text,
+          createdAt: comment.createdAt
+        }
+      });
+    } else {
+      // In-memory fallback
+      const user = users.find(u => String(u.id) === userId);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      const commentId = 'comment_' + Date.now();
+      const newComment = {
+        _id: commentId,
+        noteId: noteId,
+        userId: userId,
+        userName: user.name,
+        text: text.trim(),
+        createdAt: new Date().toISOString()
+      };
+
+      if (!global.commentsInMemory) {
+        global.commentsInMemory = [];
+      }
+      global.commentsInMemory.push(newComment);
+
+      return res.status(201).json({
+        message: 'Comment added',
+        comment: newComment
+      });
+    }
   } catch (error) {
     console.error('Add comment error:', error);
     res.status(500).json({ message: 'Failed to add comment', error: error.message });
@@ -4139,28 +4264,47 @@ app.delete('/api/comments/:commentId', async (req, res) => {
     const userId = token.replace('dev_token_', '');
     const commentId = req.params.commentId;
 
-    if (!useMongoDB) {
-      return res.status(503).json({ message: 'Database not available' });
+    if (useMongoDB) {
+      if (!mongoose.Types.ObjectId.isValid(commentId) || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ message: 'Invalid ID format' });
+      }
+
+      const comment = await Comment.findById(commentId);
+      if (!comment) {
+        return res.status(404).json({ message: 'Comment not found' });
+      }
+
+      // Check if user owns the comment or is admin
+      const user = await User.findById(userId);
+      if (comment.userId.toString() !== userId && !user?.isAdmin) {
+        return res.status(403).json({ message: 'Not authorized to delete this comment' });
+      }
+
+      await Comment.findByIdAndDelete(commentId);
+
+      return res.json({ message: 'Comment deleted' });
+    } else {
+      // In-memory fallback
+      if (!global.commentsInMemory) {
+        global.commentsInMemory = [];
+      }
+      
+      const commentIndex = global.commentsInMemory.findIndex(c => String(c._id) === String(commentId));
+      if (commentIndex === -1) {
+        return res.status(404).json({ message: 'Comment not found' });
+      }
+
+      const comment = global.commentsInMemory[commentIndex];
+      const user = users.find(u => String(u.id) === userId);
+
+      // Allow deletion if owner or admin
+      if (String(comment.userId) !== userId && !user?.isAdmin) {
+        return res.status(403).json({ message: 'Not authorized to delete this comment' });
+      }
+
+      global.commentsInMemory.splice(commentIndex, 1);
+      return res.json({ message: 'Comment deleted' });
     }
-
-    if (!mongoose.Types.ObjectId.isValid(commentId) || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid ID format' });
-    }
-
-    const comment = await Comment.findById(commentId);
-    if (!comment) {
-      return res.status(404).json({ message: 'Comment not found' });
-    }
-
-    // Check if user owns the comment or is admin
-    const user = await User.findById(userId);
-    if (comment.userId.toString() !== userId && !user?.isAdmin) {
-      return res.status(403).json({ message: 'Not authorized to delete this comment' });
-    }
-
-    await Comment.findByIdAndDelete(commentId);
-
-    res.json({ message: 'Comment deleted' });
   } catch (error) {
     console.error('Delete comment error:', error);
     res.status(500).json({ message: 'Failed to delete comment' });
@@ -4386,6 +4530,26 @@ async function startServer() {
     // Try MongoDB connection first
     useMongoDB = await connectMongoDB();
     console.log('[DEBUG] MongoDB connection result:', useMongoDB);
+    
+    if (!useMongoDB) {
+      // Add a default test user if in-memory
+      users.push({
+        id: 'testuser123',
+        _id: 'testuser123',
+        name: 'Test User',
+        email: 'test@example.com',
+        password: 'password123',
+        role: 'student',
+        branch: 'Computer Science',
+        section: 'A',
+        notesUploaded: 0,
+        totalDownloads: 0,
+        totalViews: 0,
+        profilePic: '',
+        createdAt: new Date()
+      });
+      console.log('✅ In-memory fallback pre-populated with test user (test@example.com / password123)');
+    }
     
     // Configure Google OAuth
     googleAuthEnabled = configureGoogleAuth();

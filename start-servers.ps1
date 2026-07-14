@@ -14,7 +14,7 @@ Start-Sleep -Seconds 2
 
 # Function to start backend with auto-restart
 $backendScript = {
-    Set-Location "C:\notemitra1\server"
+    Set-Location "$PSScriptRoot\server"
     while ($true) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting Backend..." -ForegroundColor Cyan
         node server-enhanced.js
@@ -25,7 +25,7 @@ $backendScript = {
 
 # Function to start frontend with auto-restart
 $frontendScript = {
-    Set-Location "C:\notemitra1\client"
+    Set-Location "$PSScriptRoot\client"
     while ($true) {
         Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Starting Frontend..." -ForegroundColor Cyan
         npm run dev

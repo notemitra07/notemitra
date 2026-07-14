@@ -15,17 +15,20 @@ import {
   Flag,
   Share2,
   Bookmark,
-  BookmarkPlus,
+  BookmarkCheck,
   Send,
   Edit,
   Trash2,
-  Loader2
+  Loader2,
+  Check,
+  X,
+  AlertTriangle
 } from 'lucide-react';
 import { notesAPI } from '@/lib/api';
 
 interface Note {
-  id?: number | string; // Can be number (in-memory) or string (MongoDB _id)
-  _id?: string; // MongoDB uses _id
+  id?: number | string;
+  _id?: string;
   title: string;
   description: string;
   subject: string;
@@ -33,7 +36,7 @@ interface Note {
   module: string;
   branch: string;
   userName: string;
-  userId: number | string; // Can be ObjectId string
+  userId: number | string;
   views: number;
   downloads: number;
   upvotes: number;
@@ -55,6 +58,118 @@ interface Comment {
   createdAt: string;
 }
 
+// Toast Notification Component
+function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error' | 'info'; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  const colors = {
+    success: 'bg-green-50 border-green-200 text-green-800',
+    error: 'bg-red-50 border-red-200 text-red-800',
+    info: 'bg-blue-50 border-blue-200 text-blue-800',
+  };
+  const icons = {
+    success: <Check className="w-4 h-4 text-green-600" />,
+    error: <X className="w-4 h-4 text-red-600" />,
+    info: <Check className="w-4 h-4 text-blue-600" />,
+  };
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg ${colors[type]} animate-in slide-in-from-bottom-2 duration-300`}>
+      {icons[type]}
+      <span className="text-sm font-medium">{message}</span>
+      <button onClick={onClose} className="ml-2 opacity-60 hover:opacity-100">
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
+// Report Modal Component
+function ReportModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const reasons = [
+    'Inappropriate content',
+    'Copyright violation',
+    'Spam or misleading',
+    'Wrong category',
+    'Duplicate content',
+    'Other',
+  ];
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reason.trim()) return;
+    setSubmitting(true);
+    await onSubmit(reason);
+    setSubmitting(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+            <AlertTriangle className="w-5 h-5 text-red-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Report this note</h3>
+            <p className="text-sm text-gray-500">Help keep the community safe</p>
+          </div>
+          <button onClick={onClose} className="ml-auto p-1 text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-2 mb-4">
+            {reasons.map((r) => (
+              <label key={r} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${reason === r ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                <input
+                  type="radio"
+                  name="reason"
+                  value={r}
+                  checked={reason === r}
+                  onChange={() => setReason(r)}
+                  className="text-red-500"
+                />
+                <span className="text-sm text-gray-700">{r}</span>
+              </label>
+            ))}
+          </div>
+
+          {reason === 'Other' && (
+            <textarea
+              placeholder="Describe the issue..."
+              className="w-full p-3 border border-gray-300 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-300"
+              rows={3}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          )}
+
+          <div className="flex gap-3">
+            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!reason.trim() || submitting}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Report'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function NoteDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -67,64 +182,44 @@ export default function NoteDetailPage() {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
-  const [isLiking, setIsLiking] = useState(false); // Prevent rapid clicks
+  const [isLiking, setIsLiking] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
 
   useEffect(() => {
     if (noteId) {
       fetchNoteDetails();
-      checkIfSaved();
+      if (user) checkIfSaved();
     }
-  }, [noteId]);
+  }, [noteId, user]);
 
   const fetchNoteDetails = async () => {
     try {
       setLoading(true);
-      
-      console.log('🔍 Fetching note with ID:', noteId);
-      
-      // Fetch note details
       const noteResponse = await notesAPI.getNoteById(noteId);
-      
-      console.log('📦 Received note response:', {
-        fullResponse: noteResponse,
-        noteData: noteResponse.data,
-        note: noteResponse.data.note
-      });
-      
       const fetchedNote = noteResponse.data.note;
       const userLiked = noteResponse.data.userLiked;
-      
-      // Ensure note has proper ID fields
+
       if (fetchedNote) {
-        // MongoDB uses _id, but we also want id for consistency
         if (fetchedNote._id && !fetchedNote.id) {
           fetchedNote.id = fetchedNote._id;
         }
-        
-        console.log('✅ Note set with IDs:', {
-          id: fetchedNote.id,
-          _id: fetchedNote._id,
-          hasId: !!fetchedNote.id,
-          has_id: !!fetchedNote._id,
-          title: fetchedNote.title,
-          fileId: fetchedNote.fileId,
-          userLiked
-        });
-      } else {
-        console.error('❌ No note in response');
       }
-      
+
       setNote(fetchedNote);
       setIsLiked(userLiked || false);
 
-      // Fetch real comments from the backend
       try {
         const commentsResponse = await notesAPI.getComments(noteId);
         setComments(commentsResponse.data.comments || []);
-      } catch (err) {
-        console.error('Failed to fetch comments:', err);
+      } catch {
         setComments([]);
       }
     } catch (error) {
@@ -139,463 +234,184 @@ export default function NoteDetailPage() {
     try {
       const response = await notesAPI.checkIfSaved(noteId);
       setIsSaved(response.data.saved);
-    } catch (error) {
-      console.error('Failed to check saved status:', error);
-    }
-  };
-
-  const handleSaveToggle = async () => {
-    if (!user) {
-      router.push('/auth/signin');
-      return;
-    }
-
-    try {
-      setSavingNote(true);
-      if (isSaved) {
-        await notesAPI.unsaveNote(noteId);
-        setIsSaved(false);
-      } else {
-        await notesAPI.saveNote(noteId);
-        setIsSaved(true);
-      }
-    } catch (error) {
-      console.error('Failed to save/unsave note:', error);
-      alert('Failed to save note. Please try again.');
-    } finally {
-      setSavingNote(false);
-    }
+    } catch {}
   };
 
   const handleDownload = async () => {
-    if (!note) {
-      console.error('❌ No note object available for download');
-      alert('Error: Note data not loaded. Please refresh the page.');
-      return;
-    }
-    
+    if (!note || isDownloading) return;
+    setIsDownloading(true);
+
     try {
-      // Debug: Log full note object
-      console.log('📥 Starting download for note:', {
-        fullNote: note,
-        noteId: note._id || note.id,
-        note_id: note._id,
-        noteId_direct: note.id,
-        fileId: note.fileId,
-        fileName: note.fileName,
-        title: note.title,
-        allKeys: Object.keys(note)
-      });
-      
-      // Determine note ID - try multiple fields
-      // Priority: _id (MongoDB) > id (in-memory) > noteId param from URL
-      let downloadNoteId = note._id || note.id || noteId;
-      
-      console.log('🔍 Note ID candidates:', {
-        from_id: note._id,
-        from_id_field: note.id,
-        from_url_param: noteId,
-        selected: downloadNoteId
-      });
-      
-      if (!downloadNoteId) {
-        console.error('❌ No valid note ID found in:', {
-          note_id: note._id,
-          note_id_field: note.id,
-          url_param: noteId,
-          note_object: note
-        });
-        throw new Error('Note ID not found. Cannot identify note. Please refresh the page.');
-      }
-      
-      // Convert to string safely
-      const noteIdString = String(downloadNoteId).trim();
-      
-      if (!noteIdString) {
-        throw new Error('Invalid note ID format.');
-      }
-      
-      console.log('✅ Using note ID:', noteIdString);
-      
-      // Use API base URL which already includes /api
+      const downloadNoteId = note._id || note.id || noteId;
       const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-      const downloadUrl = `${apiBase}/notes/${noteIdString}/download`;
-      
-      console.log('📡 Fetching from:', downloadUrl);
-      console.log('📡 Request details:', {
-        method: 'GET',
-        url: downloadUrl,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Fetch with timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
+      const downloadUrl = `${apiBase}/notes/${String(downloadNoteId).trim()}/download`;
+
       const response = await fetch(downloadUrl, {
         method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/pdf, application/json'
-        }
+        headers: { 'Accept': 'application/pdf, application/json' }
       });
-      
-      clearTimeout(timeoutId);
-      
-      console.log('📡 Response received:', {
-        status: response.status,
-        statusText: response.statusText,
-        contentType: response.headers.get('content-type'),
-        contentLength: response.headers.get('content-length'),
-        contentDisposition: response.headers.get('content-disposition')
-      });
-      
-      // Check if response is OK
+
       if (!response.ok) {
-        // Try to parse error message
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          console.error('❌ Server error response:', errorData);
-          throw new Error(errorData.message || `Server error: ${response.status}`);
-        } else {
-          const errorText = await response.text();
-          console.error('❌ Server error text:', errorText);
-          throw new Error(`Download failed with status: ${response.status} - ${response.statusText}`);
-        }
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.message || `Error ${response.status}`);
       }
-      
-      // Check if response is JSON (signed URL) or binary (direct download)
-      const contentType = response.headers.get('content-type');
-      
-      if (contentType && contentType.includes('application/json')) {
-        // Response is JSON with downloadUrl (Cloudinary/signed URL mode)
+
+      const contentType = response.headers.get('content-type') || '';
+
+      let blobUrl: string;
+      let filename = note.fileName || `${note.title}.pdf`;
+      if (!filename.toLowerCase().endsWith('.pdf')) filename += '.pdf';
+      filename = filename.replace(/[<>:"/\\|?*]/g, '_');
+
+      if (contentType.includes('application/json')) {
         const data = await response.json();
-        console.log('📄 Received JSON response with download URL:', data);
-        
-        if (data.downloadUrl) {
-          // Determine proper filename with .pdf extension
-          let filename = note.fileName || `${note.title}.pdf` || 'download.pdf';
-          // Ensure filename has .pdf extension
-          if (!filename.toLowerCase().endsWith('.pdf')) {
-            filename = filename + '.pdf';
-          }
-          // Sanitize filename - remove invalid characters
-          filename = filename.replace(/[<>:"/\\|?*]/g, '_');
-          
-          console.log('📁 Using filename:', filename);
-          
-          // Fetch the actual PDF file from Cloudinary URL
-          console.log('📡 Fetching PDF from Cloudinary URL...');
-          const pdfResponse = await fetch(data.downloadUrl);
-          
-          if (!pdfResponse.ok) {
-            throw new Error(`Failed to fetch PDF from Cloudinary: ${pdfResponse.status}`);
-          }
-          
-          const blob = await pdfResponse.blob();
-          console.log('✅ Fetched PDF blob:', {
-            size: blob.size,
-            type: blob.type,
-            sizeInMB: (blob.size / 1024 / 1024).toFixed(2) + ' MB'
-          });
-          
-          // Create a proper PDF blob with explicit MIME type
-          const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-          const blobUrl = window.URL.createObjectURL(pdfBlob);
-          
-          // Create download link with proper filename
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = filename;
-          link.style.display = 'none';
-          
-          // For mobile, we need to append and click
-          document.body.appendChild(link);
-          console.log('🖱️  Triggering download with filename:', filename);
-          link.click();
-          
-          // Cleanup
-          setTimeout(() => {
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(blobUrl);
-            console.log('🧹 Cleaned up download resources');
-          }, 5000);
-          
-          console.log('✅ Download initiated with proper filename');
-          // Track download in database
-          try {
-            const downloadNoteId = note._id || note.id || noteId;
-            await notesAPI.trackDownload(String(downloadNoteId));
-            console.log('✅ Download tracked in database');
-          } catch (trackError) {
-            console.error('Failed to track download:', trackError);
-          }
-          // Update local download count
-          setNote({ ...note, downloads: note.downloads + 1 });
-        } else {
-          throw new Error('Server returned JSON but no download URL found');
-        }
+        if (!data.downloadUrl) throw new Error('No download URL returned');
+        const pdfResp = await fetch(data.downloadUrl);
+        if (!pdfResp.ok) throw new Error('Failed to fetch PDF from URL');
+        const blob = await pdfResp.blob();
+        blobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       } else {
-        // Response is binary (PDF file - GridFS mode)
-        console.log('📄 Receiving binary file data...');
-        
-        // Get the blob
         const blob = await response.blob();
-        
-        if (blob.size === 0) {
-          throw new Error('Downloaded file is empty (0 bytes)');
-        }
-        
-        console.log('✅ Downloaded blob:', {
-          size: blob.size,
-          type: blob.type,
-          sizeInMB: (blob.size / 1024 / 1024).toFixed(2) + ' MB'
-        });
-        
-        // Extract filename from Content-Disposition header or use default
-        let filename = note.fileName || `${note.title}.pdf` || 'download.pdf';
+        if (blob.size === 0) throw new Error('Downloaded file is empty');
         const disposition = response.headers.get('content-disposition');
         if (disposition) {
-          const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
-          if (filenameMatch && filenameMatch[1]) {
-            filename = filenameMatch[1];
-          }
+          const match = disposition.match(/filename="?([^"]+)"?/);
+          if (match?.[1]) filename = match[1];
         }
-        
-        console.log('📁 Using filename:', filename);
-        
-        // Ensure filename has .pdf extension
-        if (!filename.toLowerCase().endsWith('.pdf')) {
-          filename = filename + '.pdf';
-        }
-        
-        // Create a proper PDF blob with explicit MIME type
-        const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-        
-        // Detect if user is on mobile
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        
-        console.log('📱 Device detection:', { isMobile, userAgent: navigator.userAgent });
-        
-        if (isMobile) {
-          // Mobile: Open PDF in new tab/window for native PDF viewer
-          const blobUrl = window.URL.createObjectURL(pdfBlob);
-          
-          // Try to open in new window first
-          const newWindow = window.open(blobUrl, '_blank');
-          
-          if (!newWindow) {
-            // If popup blocked, try direct navigation
-            console.log('📱 Popup blocked, trying direct download...');
-            
-            // Create a download link as fallback
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = filename;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            
-            setTimeout(() => {
-              document.body.removeChild(link);
-              window.URL.revokeObjectURL(blobUrl);
-            }, 5000);
-          } else {
-            // Cleanup after a delay
-            setTimeout(() => {
-              window.URL.revokeObjectURL(blobUrl);
-            }, 60000); // Keep URL alive for 1 minute for mobile viewers
-          }
-          
-          console.log('✅ PDF opened for mobile viewing');
-        } else {
-          // Desktop: Use standard download approach
-          const blobUrl = window.URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = filename;
-          link.style.display = 'none';
-          
-          document.body.appendChild(link);
-          console.log('🖱️  Triggering download...');
-          link.click();
-          
-          setTimeout(() => {
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(blobUrl);
-            console.log('🧹 Cleaned up download resources');
-          }, 1000);
-        }
-        
-        console.log('✅ Download initiated successfully');
-        // Track download in database
-        try {
-          const downloadNoteId = note._id || note.id || noteId;
-          await notesAPI.trackDownload(String(downloadNoteId));
-          console.log('✅ Download tracked in database');
-        } catch (trackError) {
-          console.error('Failed to track download:', trackError);
-        }
-        // Update local download count
-        setNote({ ...note, downloads: note.downloads + 1 });
+        blobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       }
-      
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(blobUrl); }, 5000);
+
+      // Track and update local count
+      try {
+        await notesAPI.trackDownload(String(downloadNoteId));
+        setNote(prev => prev ? { ...prev, downloads: prev.downloads + 1 } : prev);
+      } catch {}
+
+      showToast('PDF downloaded successfully!', 'success');
     } catch (error) {
-      console.error('❌ Download error:', error);
-      
-      // Detailed error logging
-      if (error instanceof Error) {
-        console.error('Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        });
-      }
-      
-      const errorMessage = error instanceof Error ? error.message : 'Failed to download file';
-      
-      // User-friendly error message
-      alert(
-        `Download Error: ${errorMessage}\n\n` +
-        `Troubleshooting steps:\n` +
-        `1. Refresh the page and try again\n` +
-        `2. Check your internet connection\n` +
-        `3. Clear browser cache and cookies\n` +
-        `4. Try a different browser\n` +
-        `5. Contact support if the issue persists\n\n` +
-        `Technical details: Check browser console for more information`
-      );
+      const msg = error instanceof Error ? error.message : 'Download failed';
+      showToast(`Download failed: ${msg}`, 'error');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
   const handlePreview = () => {
     if (!note) return;
-    
-    // Navigate to the in-app preview page
     const noteIdToUse = note._id || note.id || noteId;
     router.push(`/notes/${noteIdToUse}/preview`);
   };
 
   const handleLike = async () => {
-    if (!user) {
-      router.push('/auth/signin');
-      return;
-    }
-
-    if (!note || isLiking) return; // Prevent rapid clicks
+    if (!user) { router.push('/auth/signin'); return; }
+    if (!note || isLiking) return;
 
     setIsLiking(true);
-    
-    // Optimistic UI update for instant feedback
     const wasLiked = isLiked;
     setIsLiked(!wasLiked);
-    setNote({
-      ...note,
-      upvotes: wasLiked ? note.upvotes - 1 : note.upvotes + 1
-    });
+    setNote(prev => prev ? { ...prev, upvotes: wasLiked ? prev.upvotes - 1 : prev.upvotes + 1 } : prev);
 
     try {
-      // Call the backend API - always use 'upvote', backend handles toggle
       const response = await notesAPI.voteNote(noteId, 'upvote');
-      
-      // Update with actual server values
       if (response.data.note) {
-        setNote(prev => prev ? {
-          ...prev,
-          upvotes: response.data.note.upvotes
-        } : prev);
-        // Check if user has liked based on response
+        setNote(prev => prev ? { ...prev, upvotes: response.data.note.upvotes } : prev);
         setIsLiked(response.data.userLiked ?? !wasLiked);
       }
-    } catch (error) {
-      console.error('Failed to like:', error);
-      // Revert optimistic update on error
+    } catch {
       setIsLiked(wasLiked);
-      setNote(prev => prev ? {
-        ...prev,
-        upvotes: wasLiked ? prev.upvotes + 1 : prev.upvotes - 1
-      } : prev);
+      setNote(prev => prev ? { ...prev, upvotes: wasLiked ? prev.upvotes + 1 : prev.upvotes - 1 } : prev);
     } finally {
       setIsLiking(false);
     }
   };
 
-  const handleSubmitComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!user) {
-      router.push('/auth/signin');
-      return;
-    }
-
-    if (!commentText.trim()) return;
-
+  const handleSaveToggle = async () => {
+    if (!user) { router.push('/auth/signin'); return; }
+    setSavingNote(true);
     try {
-      setSubmittingComment(true);
-
-      // Submit comment to backend
-      const response = await notesAPI.addComment(noteId, commentText.trim());
-      
-      // Add the new comment from server response to the list
-      if (response.data.comment) {
-        setComments([response.data.comment, ...comments]);
-      }
-      
-      setCommentText('');
-    } catch (error) {
-      console.error('Failed to submit comment:', error);
-      alert('Failed to post comment. Please try again.');
-    } finally {
-      setSubmittingComment(false);
-    }
-  };
-
-  const handleSaveNote = async () => {
-    if (!user) {
-      router.push('/auth/signin');
-      return;
-    }
-    
-    try {
-      setSavingNote(true);
       if (isSaved) {
         await notesAPI.unsaveNote(noteId);
         setIsSaved(false);
+        showToast('Note removed from saved', 'info');
       } else {
         await notesAPI.saveNote(noteId);
         setIsSaved(true);
+        showToast('Note saved to your collection!', 'success');
       }
     } catch (error: any) {
-      console.error('Failed to save/unsave note:', error);
-      // Show specific error for already saved
       if (error.response?.status === 409) {
-        setIsSaved(true); // Note is already saved
+        setIsSaved(true);
+      } else {
+        showToast('Failed to save note. Please try again.', 'error');
       }
     } finally {
       setSavingNote(false);
     }
   };
 
-  const handleReport = () => {
-    if (!user) {
-      router.push('/auth/signin');
-      return;
+  const handleShare = async () => {
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: note?.title, text: note?.description, url });
+      } catch {}
+    } else {
+      try {
+        await navigator.clipboard.writeText(url);
+        showToast('Link copied to clipboard!', 'success');
+      } catch {
+        showToast('Could not copy link', 'error');
+      }
     }
-    alert('Report functionality will be implemented');
   };
 
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: note?.title,
-        text: note?.description,
-        url: window.location.href
-      });
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      alert('Link copied to clipboard!');
+  const handleReport = async (reason: string) => {
+    if (!user) { router.push('/auth/signin'); return; }
+    try {
+      await notesAPI.reportNote(noteId, reason);
+      showToast('Report submitted. Thank you!', 'success');
+    } catch (error: any) {
+      const msg = error.response?.data?.message || 'Failed to submit report';
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleSubmitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) { router.push('/auth/signin'); return; }
+    if (!commentText.trim()) return;
+
+    setSubmittingComment(true);
+    try {
+      const response = await notesAPI.addComment(noteId, commentText.trim());
+      if (response.data.comment) {
+        setComments(prev => [response.data.comment, ...prev]);
+        setNote(prev => prev ? { ...prev } : prev);
+      }
+      setCommentText('');
+      showToast('Comment posted!', 'success');
+    } catch {
+      showToast('Failed to post comment. Please try again.', 'error');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      await notesAPI.deleteComment(commentId);
+      setComments(prev => prev.filter(c => c._id !== commentId));
+      showToast('Comment deleted', 'info');
+    } catch {
+      showToast('Failed to delete comment', 'error');
     }
   };
 
@@ -611,6 +427,7 @@ export default function NoteDetailPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
+          <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Note not found</h2>
           <p className="text-gray-600 mb-4">The note you're looking for doesn't exist.</p>
           <Button onClick={() => router.push('/browse')}>Browse Notes</Button>
@@ -621,6 +438,19 @@ export default function NoteDetailPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-4 sm:py-8">
+      {/* Toast */}
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+      )}
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <ReportModal
+          onClose={() => setShowReportModal(false)}
+          onSubmit={handleReport}
+        />
+      )}
+
       <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
         {/* Back Button */}
         <button
@@ -631,7 +461,7 @@ export default function NoteDetailPage() {
         </button>
 
         {/* Note Header */}
-        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-4 sm:mb-6">
+        <div className="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-4 sm:mb-6">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4 sm:mb-6">
             <div className="flex-1">
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2 sm:mb-3">{note.title}</h1>
@@ -668,133 +498,155 @@ export default function NoteDetailPage() {
               </div>
             </div>
 
-            {/* Download and Preview Buttons */}
+            {/* Action Buttons (top-right) */}
             <div className="flex flex-row md:flex-col gap-2 flex-wrap">
               <Button onClick={handlePreview} variant="outline" className="flex items-center gap-2 text-sm">
                 <Eye className="w-4 h-4" />
                 <span className="hidden sm:inline">Preview PDF</span>
                 <span className="sm:hidden">Preview</span>
               </Button>
-              <Button onClick={handleDownload} className="flex items-center gap-2 text-sm">
-                <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Download PDF</span>
-                <span className="sm:hidden">Download</span>
-              </Button>
-              <Button 
-                onClick={handleSaveToggle} 
-                disabled={savingNote}
-                variant={isSaved ? "default" : "outline"}
+              <Button
+                onClick={handleDownload}
+                disabled={isDownloading}
                 className="flex items-center gap-2 text-sm"
               >
-                <BookmarkPlus className="w-4 h-4" />
-                {savingNote ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
+                {isDownloading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">{isDownloading ? 'Downloading...' : 'Download PDF'}</span>
+                <span className="sm:hidden">{isDownloading ? '...' : 'Download'}</span>
               </Button>
-              <div className="text-xs sm:text-sm text-gray-600 text-center w-full md:w-auto">
-                {note.fileSize ? `${(note.fileSize / (1024 * 1024)).toFixed(2)} MB` : 'Size unknown'}
-              </div>
-            </div>
-          </div>
-
-          {/* Stats and Actions Row */}
-          <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-4 pt-4 sm:pt-6 border-t border-gray-200">
-            {/* Stats */}
-            <div className="flex items-center gap-4 sm:gap-6 text-gray-600 text-sm sm:text-base">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="font-medium">{note.views}</span>
-                <span className="text-xs sm:text-sm">views</span>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <Download className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="font-medium">{note.downloads}</span>
-                <span className="text-xs sm:text-sm">downloads</span>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="font-medium">{comments.length}</span>
-                <span className="text-xs sm:text-sm hidden sm:inline">comments</span>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-              {/* Like Button - Instagram style */}
-              <button
-                onClick={handleLike}
-                disabled={isLiking}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 active:scale-95 ${
-                  isLiking 
-                    ? 'bg-gray-200 cursor-not-allowed opacity-70' 
-                    : 'bg-gray-100 hover:bg-gray-200'
-                }`}
-              >
-                <Heart
-                  className={`w-5 h-5 transition-all duration-200 ${
-                    isLiked
-                      ? 'fill-red-500 text-red-500 scale-110'
-                      : 'text-gray-600 hover:text-red-400'
-                  }`}
-                />
-                <span className="font-medium text-gray-900">
-                  {note.upvotes}
-                </span>
-              </button>
-
-              {/* Save */}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleSaveNote}
+              <Button
+                onClick={handleSaveToggle}
                 disabled={savingNote}
-                className={isSaved ? 'bg-blue-50 border-blue-300 text-blue-600' : ''}
+                variant={isSaved ? 'default' : 'outline'}
+                className={`flex items-center gap-2 text-sm ${isSaved ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
               >
                 {savingNote ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : isSaved ? (
-                  <Bookmark className="w-4 h-4 fill-current" />
+                  <BookmarkCheck className="w-4 h-4" />
                 ) : (
-                  <BookmarkPlus className="w-4 h-4" />
+                  <Bookmark className="w-4 h-4" />
                 )}
+                {savingNote ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
               </Button>
+              <div className="text-xs sm:text-sm text-gray-500 text-center w-full md:w-auto">
+                {note.fileSize ? `${(note.fileSize / (1024 * 1024)).toFixed(2)} MB` : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* Stats and Action Row */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-4 pt-4 border-t border-gray-100">
+            {/* Stats */}
+            <div className="flex items-center gap-5 text-gray-500 text-sm">
+              <div className="flex items-center gap-1.5">
+                <Eye className="w-4 h-4" />
+                <span className="font-semibold text-gray-700">{note.views}</span>
+                <span>views</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Download className="w-4 h-4" />
+                <span className="font-semibold text-gray-700">{note.downloads}</span>
+                <span>downloads</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4" />
+                <span className="font-semibold text-gray-700">{comments.length}</span>
+                <span>comments</span>
+              </div>
+            </div>
+
+            {/* Interactive Buttons */}
+            <div className="flex items-center gap-2">
+              {/* Like */}
+              <button
+                onClick={handleLike}
+                disabled={isLiking}
+                title={isLiked ? 'Unlike' : 'Like'}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-200 active:scale-95 border ${
+                  isLiked
+                    ? 'bg-red-50 border-red-200 text-red-600'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-red-200 hover:bg-red-50'
+                } ${isLiking ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                <Heart
+                  className={`w-5 h-5 transition-all duration-200 ${isLiked ? 'fill-red-500 text-red-500 scale-110' : ''}`}
+                />
+                <span className="font-semibold text-sm">{note.upvotes}</span>
+              </button>
+
+              {/* Save (icon button) */}
+              <button
+                onClick={handleSaveToggle}
+                disabled={savingNote}
+                title={isSaved ? 'Unsave' : 'Save'}
+                className={`p-2 rounded-xl border transition-all duration-200 ${
+                  isSaved
+                    ? 'bg-blue-50 border-blue-200 text-blue-600'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-blue-200 hover:bg-blue-50'
+                }`}
+              >
+                {savingNote ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : isSaved ? (
+                  <BookmarkCheck className="w-5 h-5" />
+                ) : (
+                  <Bookmark className="w-5 h-5" />
+                )}
+              </button>
 
               {/* Share */}
-              <Button variant="outline" size="sm" onClick={handleShare}>
-                <Share2 className="w-4 h-4" />
-              </Button>
+              <button
+                onClick={handleShare}
+                title="Share"
+                className="p-2 rounded-xl border border-gray-200 bg-gray-50 text-gray-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 transition-all duration-200"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
 
               {/* Report */}
-              <Button variant="outline" size="sm" onClick={handleReport}>
-                <Flag className="w-4 h-4" />
-              </Button>
+              {user && (
+                <button
+                  onClick={() => setShowReportModal(true)}
+                  title="Report"
+                  className="p-2 rounded-xl border border-gray-200 bg-gray-50 text-gray-400 hover:border-red-200 hover:bg-red-50 hover:text-red-500 transition-all duration-200"
+                >
+                  <Flag className="w-5 h-5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* Comments Section */}
-        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+        <div className="bg-white rounded-2xl shadow-md p-4 sm:p-6">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">
             Comments ({comments.length})
           </h2>
 
-          {/* Add Comment Form */}
+          {/* Add Comment */}
           {user ? (
-            <form onSubmit={handleSubmitComment} className="mb-4 sm:mb-6">
-              <div className="flex gap-2 sm:gap-3">
-                <div className="flex-1">
-                  <textarea
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Add a comment..."
-                    rows={3}
-                    className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm sm:text-base"
-                  />
-                </div>
-              </div>
+            <form onSubmit={handleSubmitComment} className="mb-6">
+              <textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Add a comment..."
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent text-sm sm:text-base resize-none"
+              />
               <div className="flex justify-end mt-2">
-                <Button type="submit" disabled={submittingComment || !commentText.trim()} className="text-sm sm:text-base">
+                <Button
+                  type="submit"
+                  disabled={submittingComment || !commentText.trim()}
+                  className="text-sm sm:text-base"
+                >
                   {submittingComment ? (
                     <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Posting...
                     </>
                   ) : (
@@ -807,56 +659,51 @@ export default function NoteDetailPage() {
               </div>
             </form>
           ) : (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6 text-center">
-              <p className="text-gray-600 mb-2 sm:mb-3 text-sm sm:text-base">Sign in to leave a comment</p>
-              <Button onClick={() => router.push('/auth/signin')} className="text-sm sm:text-base">Sign In</Button>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-center">
+              <p className="text-gray-600 mb-3 text-sm sm:text-base">Sign in to leave a comment</p>
+              <Button onClick={() => router.push('/auth/signin')}>Sign In</Button>
             </div>
           )}
 
           {/* Comments List */}
-          <div className="space-y-3 sm:space-y-4">
+          <div className="space-y-3">
             {comments.length === 0 ? (
-              <p className="text-gray-500 text-center py-6 sm:py-8 text-sm sm:text-base">
-                No comments yet. Be the first to comment!
-              </p>
+              <div className="text-center py-10">
+                <MessageSquare className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                <p className="text-gray-400 text-sm">No comments yet. Be the first to comment!</p>
+              </div>
             ) : (
               comments.map((comment) => (
                 <div
                   key={comment._id}
-                  className="border border-gray-200 rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition"
+                  className="border border-gray-100 rounded-xl p-4 hover:bg-gray-50 transition"
                 >
                   <div className="flex items-start justify-between mb-2 gap-2">
-                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                      <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-600" />
-                      <span className="font-medium text-gray-900 text-sm sm:text-base">{comment.userName}</span>
-                      <span className="text-gray-500 text-xs sm:text-sm">
-                        {new Date(comment.createdAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                    
-                    {user && user.id === comment.userId && (
-                      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-                        <button className="text-gray-400 hover:text-blue-600 p-1">
-                          <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        </button>
-                        <button 
-                          className="text-gray-400 hover:text-red-600 p-1"
-                          onClick={async () => {
-                            try {
-                              await notesAPI.deleteComment(comment._id);
-                              setComments(comments.filter(c => c._id !== comment._id));
-                            } catch (err) {
-                              console.error('Failed to delete comment:', err);
-                              alert('Failed to delete comment');
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        </button>
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <User className="w-4 h-4 text-blue-600" />
                       </div>
+                      <div>
+                        <span className="font-semibold text-gray-900 text-sm">{comment.userName}</span>
+                        <span className="text-gray-400 text-xs ml-2">
+                          {new Date(comment.createdAt).toLocaleDateString('en-US', {
+                            year: 'numeric', month: 'short', day: 'numeric'
+                          })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {user && (user.id === comment.userId || (user as any).isAdmin) && (
+                      <button
+                        className="text-gray-300 hover:text-red-500 p-1 transition flex-shrink-0"
+                        title="Delete comment"
+                        onClick={() => handleDeleteComment(comment._id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     )}
                   </div>
-                  <p className="text-gray-700 text-sm sm:text-base">{comment.text}</p>
+                  <p className="text-gray-700 text-sm leading-relaxed pl-10">{comment.text}</p>
                 </div>
               ))
             )}

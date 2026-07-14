@@ -1,5 +1,5 @@
 @echo off
-cd /d c:\notemitra1\server
+cd /d "%~dp0server"
 echo Starting NoteMitra Backend Server...
 echo.
 echo Database: MongoDB (optional in dev mode)
