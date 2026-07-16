@@ -106,7 +106,79 @@ const sendOtpEmail = async (userEmail, otp, type = 'signup') => {
   
   console.log(`\n🔑 [DEV ONLY] Generated OTP for ${userEmail} (${type}): ${otp}\n`);
   
-  try {
+    // 1. Try Brevo HTTP API (Port 443 - never blocked, allows sending to anyone once verified)
+    if (process.env.BREVO_API_KEY) {
+      try {
+        const https = require('https');
+        const postData = JSON.stringify({
+          sender: { name: 'NoteMitra', email: process.env.GMAIL_USER || 'notemitravg@gmail.com' },
+          to: [{ email: userEmail }],
+          subject: subject,
+          htmlContent: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+              <div style="background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%); padding: 30px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 28px; letter-spacing: 1px;">NoteMitra</h1>
+              </div>
+              <div style="padding: 30px; background: #ffffff;">
+                <h2 style="color: #1f2937; margin-top: 0;">Security Verification Code</h2>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.5;">
+                  Please use the following 6-digit verification code to ${actionText}:
+                </p>
+                <div style="text-align: center; margin: 35px 0;">
+                  <span style="font-family: 'Courier New', monospace; font-size: 36px; font-weight: bold; background: #f3f4f6; color: #1e40af; padding: 12px 24px; border-radius: 8px; letter-spacing: 5px; border: 1px solid #d1d5db;">
+                    ${otp}
+                  </span>
+                </div>
+                <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">
+                  This verification code is valid for 10 minutes. If you did not request this, please ignore this email or contact support.
+                </p>
+                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-bottom: 0;">
+                  © ${new Date().getFullYear()} NoteMitra - MIC College of Technology
+                </p>
+              </div>
+            </div>
+          `
+        });
+
+        const brevoOptions = {
+          hostname: 'api.brevo.com',
+          port: 443,
+          path: '/v3/smtp/email',
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY,
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(postData)
+          }
+        };
+
+        await new Promise((resolve, reject) => {
+          const req = https.request(brevoOptions, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve();
+              } else {
+                reject(new Error(`Brevo status code: ${res.statusCode}, response: ${body}`));
+              }
+            });
+          });
+          req.on('error', (err) => reject(err));
+          req.write(postData);
+          req.end();
+        });
+
+        console.log(`✅ ${type === 'signup' ? 'Signup' : 'Login'} OTP email sent via Brevo to:`, userEmail);
+        return true;
+      } catch (brevoErr) {
+        console.error('❌ Brevo API failed, attempting other fallbacks...', brevoErr.message);
+      }
+    }
+
+    // 2. Try Gmail SMTP if configured
     if (process.env.GMAIL_APP_PASSWORD) {
       const mailOptions = {
         from: '"NoteMitra" <notemitravg@gmail.com>',
@@ -148,7 +220,7 @@ const sendOtpEmail = async (userEmail, otp, type = 'signup') => {
       }
     }
     
-    // Fallback to Resend if Gmail not configured or failed
+    // 3. Fallback to Resend if Gmail not configured or failed
     if (process.env.RESEND_API_KEY && resend) {
       await resend.emails.send({
         from: 'NoteMitra <onboarding@resend.dev>',
