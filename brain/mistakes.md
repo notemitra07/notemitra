@@ -25,3 +25,20 @@ This log is used to capture critical bugs, integration issues, and troubleshooti
 - **Cause**: Next.js compiler cache inside `.next/` directory became out-of-sync with changes made to types and API responses.
 - **Fix**: Run `Remove-Item -Recurse -Force .next` inside the `client` directory to force clean re-compilation.
 - **Status**: Resolved
+
+---
+
+## Issue 4: Cloudinary Raw PDFs White Screen in Iframe Preview
+- **Problem**: PDF previews show a blank/white screen when using Cloudinary raw storage URLs.
+- **Cause**: Cloudinary serves files uploaded with `resource_type: "raw"` with a `Content-Disposition: attachment` header, forcing the browser to download the file instead of displaying it inline within an iframe.
+- **Fix**: Implemented a backend proxy `/api/notes/:id/view` that streams the PDF with `Content-Disposition: inline` and updated the preview client page to load through this endpoint.
+- **Status**: Resolved
+
+---
+
+## Issue 5: Statistics Mismatch between Browse and Note Details Page
+- **Problem**: Browse note card displays different views/downloads from the details page for the same note.
+- **Cause**: The `/api/notes` browse list endpoint set a `Cache-Control: public, max-age=30` header, caching stale statistics inside the browser cache for up to 30 seconds after a download occurred.
+- **Fix**: Changed the `/api/notes` cache header to `no-cache, no-store, must-revalidate` to ensure statistics update dynamically upon page transition.
+- **Status**: Resolved
+

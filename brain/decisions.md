@@ -30,3 +30,11 @@ This log tracks architectural and design choices made throughout the lifecycle o
 - **Rationale**: Students (`@mictech.edu.in`) and Faculty (`@mictech.ac.in`) logins need strictly separated roles and dashboard access. A pre-seeded Super Admin account controls user promotion/demotion and login creations. Grouping students by branch and faculty by department on the client-side allows clean administrative supervision.
 - **Alternatives Considered**: Adding role selector screens or complex multi-level permissions middleware.
 
+---
+
+## Decision 5: Unified Backend PDF Inline Viewer Proxy
+- **Date**: July 2026
+- **Rationale**: Direct embedding of raw Cloudinary PDF URLs inside client `iframe`s causes blank screens because Cloudinary serves raw resource types with `Content-Disposition: attachment` by default. Introducing `/api/notes/:id/view` on the backend acts as a proxy, fetching the PDF and returning it with `Content-Disposition: inline` so the browser's built-in PDF viewer can render it. This also shields the client from mixed content and CORS issues across both Cloudinary and GridFS storages.
+- **Alternatives Considered**: Google Docs Viewer (incompatible with local development/development IP ranges).
+
+

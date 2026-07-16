@@ -102,16 +102,10 @@ export default function PDFPreviewPage() {
           console.error('Failed to track preview:', err);
         }
         
-        // Get the PDF URL - use direct URL (works for localhost)
-        let rawPdfUrl = '';
-        if (fetchedNote.cloudinaryUrl) {
-          rawPdfUrl = fetchedNote.cloudinaryUrl;
-        } else if (fetchedNote.fileUrl) {
-          rawPdfUrl = fetchedNote.fileUrl;
-        } else if (fetchedNote.fileId) {
-          const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-          rawPdfUrl = `${apiBase}/notes/view-pdf/${fetchedNote.fileId}`;
-        }
+        // Get the PDF URL - use the unified backend view endpoint
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const noteIdToUse = fetchedNote.id || fetchedNote._id || noteId;
+        const rawPdfUrl = `${apiBase}/notes/${noteIdToUse}/view`;
         
         if (rawPdfUrl) {
           setPdfUrl(rawPdfUrl);

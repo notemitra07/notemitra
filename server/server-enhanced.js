@@ -2225,8 +2225,8 @@ app.put('/api/admin/reports/:noteId/resolve', adminMiddleware, async (req, res) 
 // Notes routes
 app.get('/api/notes', async (req, res) => {
   try {
-    // Add cache header for better performance (cache for 30 seconds)
-    res.set('Cache-Control', 'public, max-age=30');
+    // Disable browser/proxy caching to keep view and download stats in sync
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     
     const { subject, semester, branch, page = 1, limit = 50 } = req.query;
     
@@ -2901,6 +2901,117 @@ app.get('/api/notes/download-pdf/:fileId', async (req, res) => {
         error: 'INTERNAL_ERROR',
         details: error.message 
       });
+    }
+  }
+});
+
+// NEW: View PDF inline by note ID (handles Cloudinary and GridFS)
+app.get('/api/notes/:id/view', async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    
+    if (!noteId || noteId.trim() === '') {
+      return res.status(400).json({ message: 'Note ID is required' });
+    }
+
+    if (useMongoDB) {
+      // Validate ObjectId format
+      if (!mongoose.Types.ObjectId.isValid(noteId)) {
+        return res.status(400).json({ message: 'Invalid note ID format' });
+      }
+
+      const note = await Note.findById(noteId).lean();
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
+      }
+
+      // Determine PDF URL
+      let pdfUrl = note.cloudinaryUrl || note.fileUrl;
+      
+      // Sanitize filename and ensure .pdf extension
+      let sanitizedFilename = (note.fileName || note.title || 'document').replace(/[^\w\s.-]/gi, '_');
+      if (!sanitizedFilename.toLowerCase().endsWith('.pdf')) {
+        sanitizedFilename += '.pdf';
+      }
+      const encodedFilename = encodeURIComponent(sanitizedFilename).replace(/['()]/g, escape);
+
+      // Set base headers for inline display
+      const headers = {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}`,
+        'Cache-Control': 'public, max-age=31536000',
+        'Accept-Ranges': 'bytes',
+        'X-Content-Type-Options': 'nosniff',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Length, Content-Disposition'
+      };
+
+      if (pdfUrl && pdfUrl.startsWith('https://res.cloudinary.com')) {
+        console.log(`👁️ Proxying Cloudinary PDF view for Note: ${noteId}, URL: ${pdfUrl}`);
+        
+        const https = require('https');
+        https.get(pdfUrl, (cloudinaryRes) => {
+          if (cloudinaryRes.statusCode >= 400) {
+            console.error(`❌ Cloudinary responded with status: ${cloudinaryRes.statusCode}`);
+            if (!res.headersSent) {
+              return res.status(cloudinaryRes.statusCode).json({ message: 'Failed to retrieve PDF from Cloudinary' });
+            }
+          }
+          
+          if (cloudinaryRes.headers['content-length']) {
+            headers['Content-Length'] = cloudinaryRes.headers['content-length'];
+          }
+          
+          res.set(headers);
+          cloudinaryRes.pipe(res);
+        }).on('error', (error) => {
+          console.error('❌ Cloudinary stream request error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ message: 'Error streaming file from Cloudinary', error: error.message });
+          }
+        });
+      } else if (note.fileId) {
+        console.log(`👁️ Streaming GridFS PDF view for Note: ${noteId}, fileId: ${note.fileId}`);
+        const fileId = new mongoose.Types.ObjectId(note.fileId);
+        const files = await gfs.files.findOne({ _id: fileId });
+        
+        if (!files) {
+          console.log('❌ File not found in GridFS for preview:', fileId);
+          return res.status(404).json({ message: 'File not found' });
+        }
+
+        headers['Content-Length'] = files.length;
+        res.set(headers);
+
+        const readstream = gridfsBucket.openDownloadStream(fileId);
+        readstream.on('error', (error) => {
+          console.error('❌ GridFS stream error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ message: 'Error streaming file from database' });
+          }
+        });
+        readstream.pipe(res);
+      } else if (pdfUrl) {
+        res.redirect(pdfUrl);
+      } else {
+        res.status(404).json({ message: 'No file associated with this note' });
+      }
+    } else {
+      // In-memory version
+      const note = notes.find(n => n.id === parseInt(noteId));
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
+      }
+      if (note.fileUrl) {
+        res.redirect(note.fileUrl);
+      } else {
+        res.status(404).json({ message: 'No file associated with this note' });
+      }
+    }
+  } catch (error) {
+    console.error('❌ View note file error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error viewing note file', error: error.message });
     }
   }
 });
