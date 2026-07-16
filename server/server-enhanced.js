@@ -13,6 +13,8 @@ const Grid = require('gridfs-stream');
 const { Resend } = require('resend');
 const nodemailer = require('nodemailer');
 const cloudinary = require('cloudinary').v2;
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
@@ -76,6 +78,111 @@ const gmailTransporter = nodemailer.createTransport({
   socketTimeout: 60000
 });
 
+// Helper to log admin actions
+const logAdminAction = async (action, adminUser, targetId, targetType, details = {}) => {
+  try {
+    if (!useMongoDB) return;
+    const log = new AuditLog({
+      action,
+      performedBy: adminUser._id || adminUser.id,
+      performedByName: adminUser.name || adminUser.email,
+      targetId,
+      targetType,
+      details
+    });
+    await log.save();
+    console.log(`📝 [AUDIT LOG] ${action} performed by ${adminUser.email} on target ${targetId}`);
+  } catch (error) {
+    console.error('Failed to save audit log:', error);
+  }
+};
+
+// Helper to send OTP emails
+const sendOtpEmail = async (userEmail, otp, type = 'signup') => {
+  const isSignup = type === 'signup';
+  const subject = isSignup ? 'Verify Your NoteMitra Account' : 'NoteMitra Login OTP - New Device Detected';
+  const actionText = isSignup ? 'verify your email address and create your account' : 'complete your login from a new device';
+  
+  console.log(`\n🔑 [DEV ONLY] Generated OTP for ${userEmail} (${type}): ${otp}\n`);
+  
+  try {
+    if (process.env.GMAIL_APP_PASSWORD) {
+      const mailOptions = {
+        from: '"NoteMitra" <notemitravg@gmail.com>',
+        to: userEmail,
+        subject: subject,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%); padding: 30px; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 28px; letter-spacing: 1px;">NoteMitra</h1>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+              <h2 style="color: #1f2937; margin-top: 0;">Security Verification Code</h2>
+              <p style="color: #4b5563; font-size: 16px; line-height: 1.5;">
+                Please use the following 6-digit verification code to ${actionText}:
+              </p>
+              <div style="text-align: center; margin: 35px 0;">
+                <span style="font-family: 'Courier New', monospace; font-size: 36px; font-weight: bold; background: #f3f4f6; color: #1e40af; padding: 12px 24px; border-radius: 8px; letter-spacing: 5px; border: 1px solid #d1d5db;">
+                  ${otp}
+                </span>
+              </div>
+              <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">
+                This verification code is valid for 10 minutes. If you did not request this, please ignore this email or contact support.
+              </p>
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+              <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-bottom: 0;">
+                © ${new Date().getFullYear()} NoteMitra - MIC College of Technology
+              </p>
+            </div>
+          </div>
+        `
+      };
+      
+      await gmailTransporter.sendMail(mailOptions);
+      console.log(`✅ ${type === 'signup' ? 'Signup' : 'Login'} OTP email sent via Gmail to:`, userEmail);
+      return true;
+    }
+    
+    // Fallback to Resend if Gmail not configured
+    if (process.env.RESEND_API_KEY && resend) {
+      await resend.emails.send({
+        from: 'NoteMitra <onboarding@resend.dev>',
+        to: userEmail,
+        subject: subject,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+            <div style="background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%); padding: 30px; text-align: center;">
+              <h1 style="color: white; margin: 0;">NoteMitra</h1>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+              <h2 style="color: #1f2937;">Security Verification Code</h2>
+              <p style="color: #4b5563; font-size: 16px;">
+                Please use the following 6-digit verification code to ${actionText}:
+              </p>
+              <div style="text-align: center; margin: 30px 0;">
+                <span style="font-size: 32px; font-weight: bold; background: #f3f4f6; color: #1e40af; padding: 10px 20px; border-radius: 8px; letter-spacing: 4px;">
+                  ${otp}
+                </span>
+              </div>
+              <p style="color: #6b7280; font-size: 14px;">
+                This code will expire in 10 minutes.
+              </p>
+            </div>
+          </div>
+        `
+      });
+      console.log(`✅ ${type === 'signup' ? 'Signup' : 'Login'} OTP email sent via Resend to:`, userEmail);
+      return true;
+    }
+    
+    console.log(`⚠️ Email credentials not set. Code printed to console for development: ${otp}`);
+    return false;
+  } catch (error) {
+    console.error(`❌ Failed to send ${type} OTP email to ${userEmail}:`, error.message);
+    return false;
+  }
+};
+
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -94,6 +201,29 @@ const uploadMemory = multer({
       cb(new Error('Only PDF files are allowed'), false);
     }
   }
+});
+
+// Enable secure headers with helmet
+app.use(helmet({
+  contentSecurityPolicy: false, // Disables default Content-Security-Policy to allow local next.js scripts/styles
+  crossOriginEmbedderPolicy: false
+}));
+
+// Rate limiting configurations
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many login or registration attempts. Please try again after 15 minutes.' }
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // Limit each IP to 5 requests per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many verification code attempts. Please try again after a minute.' }
 });
 
 // Middleware
@@ -276,7 +406,7 @@ const ADMIN_EMAILS = [
 ];
 
 // MongoDB Schemas (will be used if MongoDB is available)
-let User, Note, SavedNote, Comment;
+let User, Note, SavedNote, Comment, AuditLog;
 
 // Passport serialization
 passport.serializeUser((user, done) => {
@@ -500,13 +630,20 @@ async function connectMongoDB() {
       employeeId: String,
       isAdmin: { type: Boolean, default: false },
       isSuspended: { type: Boolean, default: false },
+      isVerified: { type: Boolean, default: false },
+      verificationCode: String,
+      verificationCodeExpiry: Date,
+      loginOtp: String,
+      loginOtpExpiry: Date,
+      verifiedDevices: { type: [String], default: [] },
       totalDownloads: { type: Number, default: 0 },
       totalViews: { type: Number, default: 0 },
       notesUploaded: { type: Number, default: 0 },
       reputation: { type: Number, default: 0 },
       resetToken: { type: String, index: true },
       resetTokenExpiry: Date,
-      createdAt: { type: Date, default: Date.now }
+      createdAt: { type: Date, default: Date.now },
+      deletedAt: { type: Date, default: null, index: true } // Soft delete flag
     });
 
     const noteSchema = new mongoose.Schema({
@@ -535,7 +672,8 @@ async function connectMongoDB() {
       isApproved: { type: Boolean, default: true },
       isReported: { type: Boolean, default: false },
       reportReason: String,
-      createdAt: { type: Date, default: Date.now, index: true }
+      createdAt: { type: Date, default: Date.now, index: true },
+      deletedAt: { type: Date, default: null, index: true } // Soft delete flag
     });
 
     // Compound indexes for faster browse queries
@@ -558,13 +696,53 @@ async function connectMongoDB() {
       userId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: 'User', index: true },
       userName: { type: String, required: true },
       text: { type: String, required: true, maxlength: 1000 },
-      createdAt: { type: Date, default: Date.now }
+      createdAt: { type: Date, default: Date.now },
+      deletedAt: { type: Date, default: null, index: true } // Soft delete flag
     });
+
+    // Audit Log Schema for security / vibe coding checklist compliance
+    const auditLogSchema = new mongoose.Schema({
+      action: { type: String, required: true, index: true },
+      performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+      performedByName: String,
+      targetId: { type: mongoose.Schema.Types.ObjectId, index: true },
+      targetType: String,
+      details: mongoose.Schema.Types.Mixed,
+      createdAt: { type: Date, default: Date.now, index: true }
+    });
+
+    // Soft delete query hooks
+    const applySoftDeleteQueryHook = (schema) => {
+      schema.pre(/^find/, function(next) {
+        const query = this.getQuery();
+        if (query.deletedAt === undefined) {
+          this.where({ deletedAt: null });
+        }
+        next();
+      });
+    };
+
+    // Soft delete aggregation hooks
+    const applySoftDeleteAggregationHook = (schema) => {
+      schema.pre('aggregate', function(next) {
+        this.pipeline().unshift({ $match: { deletedAt: null } });
+        next();
+      });
+    };
+
+    applySoftDeleteQueryHook(userSchema);
+    applySoftDeleteQueryHook(noteSchema);
+    applySoftDeleteQueryHook(commentSchema);
+
+    applySoftDeleteAggregationHook(userSchema);
+    applySoftDeleteAggregationHook(noteSchema);
+    applySoftDeleteAggregationHook(commentSchema);
 
     User = mongoose.models.User || mongoose.model('User', userSchema);
     Note = mongoose.models.Note || mongoose.model('Note', noteSchema);
     SavedNote = mongoose.models.SavedNote || mongoose.model('SavedNote', savedNoteSchema);
     Comment = mongoose.models.Comment || mongoose.model('Comment', commentSchema);
+    AuditLog = mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
 
     return true;
   } catch (error) {
@@ -699,8 +877,7 @@ app.get('/api/public/stats', async (req, res) => {
 });
 
 // Auth routes
-// Auth routes
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authLimiter, async (req, res) => {
   try {
     const { name, email, password, role, branch, section, rollNo, designation, department, employeeId } = req.body;
     
@@ -752,31 +929,155 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 
     if (useMongoDB) {
-      // MongoDB version - optimized with lean() and select() for faster check
-      const existingUser = await User.findOne({ email: email.toLowerCase().trim() }).select('_id').lean();
-      if (existingUser) {
-        return res.status(400).json({ message: 'User already exists with this email' });
+      // MongoDB version
+      let user = await User.findOne({ email: email.toLowerCase().trim() });
+      if (user) {
+        if (user.isVerified) {
+          return res.status(400).json({ message: 'User already exists with this email' });
+        }
+        // User exists but is not verified, allow updating details and resending OTP
+        user.name = name.trim();
+        user.password = password;
+        user.role = normalizedRole;
+        user.branch = branch;
+        user.section = section;
+        user.rollNo = rollNo;
+        user.designation = designation;
+        user.department = department;
+        user.employeeId = employeeId;
+        user.isAdmin = isAdmin;
+      } else {
+        // Create new unverified user
+        user = new User({ 
+          name: name.trim(), 
+          email: email.toLowerCase().trim(), 
+          password, 
+          role: normalizedRole, 
+          branch, 
+          section, 
+          rollNo, 
+          designation,
+          department,
+          employeeId,
+          isAdmin, 
+          isSuspended: false,
+          isVerified: false,
+          verifiedDevices: []
+        });
       }
 
-      // Use create() for slightly faster insert
-      const user = await User.create({ 
-        name: name.trim(), 
-        email: email.toLowerCase().trim(), 
-        password, 
-        role: normalizedRole, 
-        branch, 
-        section, 
-        rollNo, 
-        designation,
-        department,
-        employeeId,
-        isAdmin, 
-        isSuspended: false 
+      // Generate 6-digit code
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      user.verificationCode = otpCode;
+      user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await user.save();
+
+      // Send email
+      await sendOtpEmail(user.email, otpCode, 'signup');
+
+      res.status(200).json({
+        message: 'Verification code sent to your email',
+        requiresVerification: true,
+        email: user.email
       });
+    } else {
+      // In-memory version
+      let user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+      if (user) {
+        if (user.isVerified) {
+          return res.status(400).json({ message: 'User already exists with this email' });
+        }
+        // Update unverified user
+        user.name = name.trim();
+        user.password = password;
+        user.role = normalizedRole;
+        user.branch = branch || '';
+        user.section = section || '';
+        user.rollNo = rollNo || '';
+        user.designation = designation || '';
+        user.department = department || '';
+        user.employeeId = employeeId || '';
+        user.isAdmin = isAdmin;
+      } else {
+        // Create new unverified user
+        user = {
+          id: (users.length + 1).toString(),
+          _id: (users.length + 1).toString(),
+          name: name.trim(),
+          email: email.toLowerCase().trim(),
+          password,
+          role: normalizedRole,
+          branch: branch || '',
+          section: section || '',
+          rollNo: rollNo || '',
+          designation: designation || '',
+          department: department || '',
+          employeeId: employeeId || '',
+          isAdmin,
+          isSuspended: false,
+          isVerified: false,
+          verifiedDevices: [],
+          createdAt: new Date()
+        };
+        users.push(user);
+      }
+
+      // Generate 6-digit code
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      user.verificationCode = otpCode;
+      user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Send email
+      await sendOtpEmail(user.email, otpCode, 'signup');
+
+      res.status(200).json({
+        message: 'Verification code sent to your email',
+        requiresVerification: true,
+        email: user.email
+      });
+    }
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ message: 'Server error during signup' });
+  }
+});
+
+app.post('/api/auth/verify-signup', otpLimiter, async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ message: 'Email and verification code are required' });
+    }
+
+    if (useMongoDB) {
+      const user = await User.findOne({ email: email.toLowerCase().trim() });
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      if (user.isVerified) {
+        return res.status(400).json({ message: 'User is already verified' });
+      }
+
+      if (user.verificationCode !== code || user.verificationCodeExpiry < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired verification code' });
+      }
+
+      user.isVerified = true;
+      user.verificationCode = undefined;
+      user.verificationCodeExpiry = undefined;
+      
+      // Generate a new trusted device token
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      if (!user.verifiedDevices) user.verifiedDevices = [];
+      user.verifiedDevices.push(deviceToken);
+      
+      await user.save();
 
       const token = 'dev_token_' + user._id;
-      res.status(201).json({
-        message: 'User created successfully',
+      res.status(200).json({
+        message: 'Account verified successfully',
         user: { 
           id: user._id, 
           name: user.name, 
@@ -790,37 +1091,35 @@ app.post('/api/auth/signup', async (req, res) => {
           employeeId: user.employeeId,
           isAdmin: user.isAdmin 
         },
-        token
+        token,
+        deviceToken
       });
     } else {
-      // In-memory version
-      const existingUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-      if (existingUser) {
-        return res.status(400).json({ message: 'User already exists with this email' });
+      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
       }
 
-      const user = {
-        id: (users.length + 1).toString(),
-        _id: (users.length + 1).toString(),
-        name: name.trim(),
-        email: email.toLowerCase().trim(),
-        password,
-        role: normalizedRole,
-        branch: branch || '',
-        section: section || '',
-        rollNo: rollNo || '',
-        designation: designation || '',
-        department: department || '',
-        employeeId: employeeId || '',
-        isAdmin,
-        isSuspended: false,
-        createdAt: new Date()
-      };
-      users.push(user);
+      if (user.isVerified) {
+        return res.status(400).json({ message: 'User is already verified' });
+      }
+
+      if (user.verificationCode !== code || user.verificationCodeExpiry < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired verification code' });
+      }
+
+      user.isVerified = true;
+      user.verificationCode = undefined;
+      user.verificationCodeExpiry = undefined;
+      
+      // Generate a new trusted device token
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      if (!user.verifiedDevices) user.verifiedDevices = [];
+      user.verifiedDevices.push(deviceToken);
 
       const token = 'dev_token_' + user.id;
-      res.status(201).json({
-        message: 'User created successfully',
+      res.status(200).json({
+        message: 'Account verified successfully',
         user: { 
           id: user.id, 
           name: user.name, 
@@ -834,16 +1133,63 @@ app.post('/api/auth/signup', async (req, res) => {
           employeeId: user.employeeId,
           isAdmin: user.isAdmin 
         },
-        token
+        token,
+        deviceToken
       });
     }
   } catch (error) {
-    console.error('Signup error:', error);
-    res.status(500).json({ message: 'Server error during signup' });
+    console.error('Verify signup error:', error);
+    res.status(500).json({ message: 'Server error during verification' });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/resend-signup-otp', otpLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
+
+    if (useMongoDB) {
+      const user = await User.findOne({ email: email.toLowerCase().trim() });
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      if (user.isVerified) {
+        return res.status(400).json({ message: 'User is already verified' });
+      }
+
+      user.verificationCode = otpCode;
+      user.verificationCodeExpiry = expiry;
+      await user.save();
+      
+      await sendOtpEmail(user.email, otpCode, 'signup');
+      res.status(200).json({ message: 'Verification code resent successfully' });
+    } else {
+      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      if (user.isVerified) {
+        return res.status(400).json({ message: 'User is already verified' });
+      }
+
+      user.verificationCode = otpCode;
+      user.verificationCodeExpiry = expiry;
+
+      await sendOtpEmail(user.email, otpCode, 'signup');
+      res.status(200).json({ message: 'Verification code resent successfully' });
+    }
+  } catch (error) {
+    console.error('Resend signup OTP error:', error);
+    res.status(500).json({ message: 'Server error during resending' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     
@@ -887,12 +1233,9 @@ app.post('/api/auth/login', async (req, res) => {
     const mongoConnected = useMongoDB && mongoose.connection.readyState === 1;
     
     if (mongoConnected) {
-      // MongoDB version - optimized with select() for faster query
       let user;
       try {
-        user = await User.findOne({ email: email.toLowerCase().trim() })
-          .select('_id name email password role branch section isAdmin isSuspended')
-          .lean();
+        user = await User.findOne({ email: email.toLowerCase().trim() });
       } catch (dbError) {
         console.error('❌ MongoDB query error:', dbError.message);
         return res.status(500).json({ 
@@ -908,9 +1251,7 @@ app.post('/api/auth/login', async (req, res) => {
           error: 'INVALID_CREDENTIALS'
         });
       }
-
-      console.log('✅ User found:', user.name, '| Checking password...');
-
+      
       // Check if user is suspended
       if (user.isSuspended) {
         console.log('❌ Login failed: User is suspended');
@@ -929,13 +1270,46 @@ app.post('/api/auth/login', async (req, res) => {
         });
       }
 
-      console.log('✅ Login successful for:', user.email);
+      // 1. Check if user is verified. If not, require signup verification
+      if (!user.isVerified) {
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.verificationCode = otpCode;
+        user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        await user.save();
+        await sendOtpEmail(user.email, otpCode, 'signup');
+        return res.status(200).json({
+          message: 'Please verify your account first. Verification code sent to email.',
+          requiresVerification: true,
+          email: user.email
+        });
+      }
+
+      // 2. Check if device is trusted
+      const { deviceToken } = req.body;
+      const isTrusted = deviceToken && user.verifiedDevices && user.verifiedDevices.includes(deviceToken);
       
-      const token = 'dev_token_' + user._id;
-      res.json({
-        message: 'Login successful',
-        user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
-        token
+      if (isTrusted || user.email === 'superadmin@notemitra.com') {
+        console.log('✅ Login successful (Trusted Device / SuperAdmin) for:', user.email);
+        const token = 'dev_token_' + user._id;
+        return res.json({
+          message: 'Login successful',
+          user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
+          token
+        });
+      }
+
+      // 3. New device detected: Require OTP
+      const loginOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      user.loginOtp = loginOtp;
+      user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      await user.save();
+
+      await sendOtpEmail(user.email, loginOtp, 'login');
+
+      return res.status(200).json({
+        message: 'New device detected. OTP sent to your email.',
+        otpRequired: true,
+        email: user.email
       });
     } else {
       // In-memory version - case-insensitive email search
@@ -963,16 +1337,148 @@ app.post('/api/auth/login', async (req, res) => {
         });
       }
 
-      const token = 'dev_token_' + user.id;
-      res.json({
-        message: 'Login successful',
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
-        token
+      // 1. Check signup verification
+      if (!user.isVerified) {
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.verificationCode = otpCode;
+        user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
+        await sendOtpEmail(user.email, otpCode, 'signup');
+        return res.status(200).json({
+          message: 'Please verify your account first. Verification code sent to email.',
+          requiresVerification: true,
+          email: user.email
+        });
+      }
+
+      // 2. Check trusted device
+      const { deviceToken } = req.body;
+      const isTrusted = deviceToken && user.verifiedDevices && user.verifiedDevices.includes(deviceToken);
+
+      if (isTrusted || user.email === 'superadmin@notemitra.com') {
+        const token = 'dev_token_' + user.id;
+        return res.json({
+          message: 'Login successful',
+          user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
+          token
+        });
+      }
+
+      // 3. New device detected: Require OTP
+      const loginOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      user.loginOtp = loginOtp;
+      user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+
+      await sendOtpEmail(user.email, loginOtp, 'login');
+
+      return res.status(200).json({
+        message: 'New device detected. OTP sent to your email.',
+        otpRequired: true,
+        email: user.email
       });
     }
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Server error during login' });
+  }
+});
+
+app.post('/api/auth/verify-login-otp', otpLimiter, async (req, res) => {
+  try {
+    const { email, password, code } = req.body;
+    if (!email || !password || !code) {
+      return res.status(400).json({ message: 'Email, password, and OTP are required' });
+    }
+
+    if (useMongoDB) {
+      const user = await User.findOne({ email: email.toLowerCase().trim() });
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      if (user.password !== password) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      if (!user.isVerified) {
+        return res.status(400).json({ message: 'Account is not verified' });
+      }
+
+      if (user.loginOtp !== code || user.loginOtpExpiry < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired OTP' });
+      }
+
+      // Clear login OTP
+      user.loginOtp = undefined;
+      user.loginOtpExpiry = undefined;
+
+      // Generate a new trusted device token
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      if (!user.verifiedDevices) user.verifiedDevices = [];
+      user.verifiedDevices.push(deviceToken);
+
+      await user.save();
+
+      const token = 'dev_token_' + user._id;
+      res.status(200).json({
+        message: 'Login successful',
+        user: { 
+          id: user._id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          isAdmin: user.isAdmin 
+        },
+        token,
+        deviceToken
+      });
+    } else {
+      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      if (user.password !== password) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      if (!user.isVerified) {
+        return res.status(400).json({ message: 'Account is not verified' });
+      }
+
+      if (user.loginOtp !== code || user.loginOtpExpiry < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired OTP' });
+      }
+
+      // Clear login OTP
+      user.loginOtp = undefined;
+      user.loginOtpExpiry = undefined;
+
+      // Generate a new trusted device token
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      if (!user.verifiedDevices) user.verifiedDevices = [];
+      user.verifiedDevices.push(deviceToken);
+
+      const token = 'dev_token_' + user.id;
+      res.status(200).json({
+        message: 'Login successful',
+        user: { 
+          id: user.id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          isAdmin: user.isAdmin 
+        },
+        token,
+        deviceToken
+      });
+    }
+  } catch (error) {
+    console.error('Verify login OTP error:', error);
+    res.status(500).json({ message: 'Server error during login verification' });
   }
 });
 
@@ -1861,6 +2367,27 @@ app.get('/api/admin/stats', adminMiddleware, async (req, res) => {
   }
 });
 
+// Get admin audit logs
+app.get('/api/admin/audit-logs', adminMiddleware, async (req, res) => {
+  try {
+    if (useMongoDB) {
+      if (!AuditLog) {
+        return res.status(503).json({ message: 'Audit log service not initialized' });
+      }
+      const logs = await AuditLog.find()
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .lean();
+      res.json({ logs });
+    } else {
+      res.json({ logs: [] });
+    }
+  } catch (error) {
+    console.error('Get audit logs error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get all users
 app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   try {
@@ -1960,19 +2487,23 @@ app.delete('/api/admin/users/:userId', adminMiddleware, async (req, res) => {
       if (user.isAdmin) {
         return res.status(400).json({ message: 'Cannot delete admin users' });
       }
-      await User.findByIdAndDelete(userId);
-      await Note.deleteMany({ userId });
+      await User.findByIdAndUpdate(userId, { deletedAt: new Date() });
+      await Note.updateMany({ userId }, { deletedAt: new Date() });
+      await logAdminAction('DELETE_USER', req.user, userId, 'User', { name: user.name, email: user.email });
       res.json({ message: 'User and their notes deleted successfully' });
     } else {
-      const userIndex = users.findIndex(u => u.id === userId);
+      const userIndex = users.findIndex(u => u.id === userId && !u.deletedAt);
       if (userIndex === -1) {
         return res.status(404).json({ message: 'User not found' });
       }
       if (users[userIndex].isAdmin) {
         return res.status(400).json({ message: 'Cannot delete admin users' });
       }
-      users.splice(userIndex, 1);
-      notes = notes.filter(n => n.userId !== userId);
+      const user = users[userIndex];
+      user.deletedAt = new Date();
+      notes.forEach(n => {
+        if (n.userId === userId) n.deletedAt = new Date();
+      });
       res.json({ message: 'User and their notes deleted successfully' });
     }
   } catch (error) {
@@ -2135,10 +2666,17 @@ app.delete('/api/admin/notes/:noteId', adminMiddleware, async (req, res) => {
     const { noteId } = req.params;
 
     if (useMongoDB) {
-      await Note.findByIdAndDelete(noteId);
+      const note = await Note.findById(noteId);
+      if (note) {
+        await Note.findByIdAndUpdate(noteId, { deletedAt: new Date() });
+        await logAdminAction('DELETE_NOTE', req.user, noteId, 'Note', { title: note.title });
+      }
       res.json({ message: 'Note deleted successfully' });
     } else {
-      notes = notes.filter(n => n.id !== noteId);
+      const noteIndex = notes.findIndex(n => n.id === noteId && !n.deletedAt);
+      if (noteIndex !== -1) {
+        notes[noteIndex].deletedAt = new Date();
+      }
       res.json({ message: 'Note deleted successfully' });
     }
   } catch (error) {
@@ -3876,8 +4414,8 @@ app.delete('/api/notes/:id', async (req, res) => {
         return res.status(403).json({ message: 'You can only delete your own notes' });
       }
       
-      // Delete the note
-      await Note.findByIdAndDelete(noteId);
+      // Delete the note (soft delete)
+      await Note.findByIdAndUpdate(noteId, { deletedAt: new Date() });
       
       // Decrement user's notesUploaded count
       await User.findByIdAndUpdate(userId, { $inc: { notesUploaded: -1 } });
@@ -3890,7 +4428,7 @@ app.delete('/api/notes/:id', async (req, res) => {
         return res.status(400).json({ message: 'Invalid note ID format' });
       }
       
-      const noteIndex = notes.findIndex(n => n.id === noteIdNum);
+      const noteIndex = notes.findIndex(n => n.id === noteIdNum && !n.deletedAt);
       if (noteIndex === -1) {
         return res.status(404).json({ message: 'Note not found' });
       }
@@ -3900,8 +4438,8 @@ app.delete('/api/notes/:id', async (req, res) => {
         return res.status(403).json({ message: 'You can only delete your own notes' });
       }
       
-      // Remove note
-      notes.splice(noteIndex, 1);
+      // Remove note (soft delete)
+      notes[noteIndex].deletedAt = new Date();
       
       res.json({ message: 'Note deleted successfully' });
     }
@@ -4474,7 +5012,7 @@ app.get('/api/notes/:id/comments', async (req, res) => {
         global.commentsInMemory = [];
       }
       const noteComments = global.commentsInMemory
-        .filter(c => String(c.noteId) === String(noteId))
+        .filter(c => String(c.noteId) === String(noteId) && !c.deletedAt)
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       return res.json({ comments: noteComments });
     }
@@ -4599,7 +5137,7 @@ app.delete('/api/comments/:commentId', async (req, res) => {
         return res.status(403).json({ message: 'Not authorized to delete this comment' });
       }
 
-      await Comment.findByIdAndDelete(commentId);
+      await Comment.findByIdAndUpdate(commentId, { deletedAt: new Date() });
 
       return res.json({ message: 'Comment deleted' });
     } else {
@@ -4608,7 +5146,7 @@ app.delete('/api/comments/:commentId', async (req, res) => {
         global.commentsInMemory = [];
       }
       
-      const commentIndex = global.commentsInMemory.findIndex(c => String(c._id) === String(commentId));
+      const commentIndex = global.commentsInMemory.findIndex(c => String(c._id) === String(commentId) && !c.deletedAt);
       if (commentIndex === -1) {
         return res.status(404).json({ message: 'Comment not found' });
       }
@@ -4621,7 +5159,7 @@ app.delete('/api/comments/:commentId', async (req, res) => {
         return res.status(403).json({ message: 'Not authorized to delete this comment' });
       }
 
-      global.commentsInMemory.splice(commentIndex, 1);
+      global.commentsInMemory[commentIndex].deletedAt = new Date();
       return res.json({ message: 'Comment deleted' });
     }
   } catch (error) {
@@ -4843,6 +5381,8 @@ async function startServer() {
         totalDownloads: 0,
         totalViews: 0,
         profilePic: '',
+        isVerified: true,
+        verifiedDevices: ['device_bypass_token'],
         createdAt: new Date()
       });
       // Add Super Admin in-memory
@@ -4859,6 +5399,8 @@ async function startServer() {
         totalDownloads: 0,
         totalViews: 0,
         profilePic: '',
+        isVerified: true,
+        verifiedDevices: ['device_bypass_token'],
         createdAt: new Date()
       });
       console.log('✅ In-memory fallback pre-populated with test user and Super Admin');

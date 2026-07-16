@@ -20,7 +20,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password?: string) => Promise<void>;
+  login: (email: string, password?: string) => Promise<any>;
   signup: (data: {
     name: string;
     email: string;
@@ -32,10 +32,11 @@ interface AuthContextType {
     designation?: string;
     department?: string;
     employeeId?: string;
-  }) => Promise<void>;
+  }) => Promise<any>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (user: User | null) => void;
+  completeAuth: (user: any, token: string, deviceToken?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -115,6 +116,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const completeAuth = (user: any, token: string, deviceToken?: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      if (deviceToken) {
+        localStorage.setItem('deviceToken', deviceToken);
+      }
+    }
+    setUser(user);
+  };
+
   const login = async (email: string, password?: string) => {
     // If only one argument (token), treat as token-based login
     if (!password && email) {
@@ -125,18 +137,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Fetch user data with the token
       const response = await authAPI.getCurrentUser();
       setUser(response.data.user);
-      return;
+      return response.data;
     }
     
     // Normal email/password login
-    const response = await authAPI.login({ email, password: password! });
-    const { user, token } = response.data;
+    let storedDeviceToken = undefined;
+    if (typeof window !== 'undefined') {
+      storedDeviceToken = localStorage.getItem('deviceToken') || undefined;
+    }
+
+    const response = await authAPI.login({ 
+      email, 
+      password: password!,
+      deviceToken: storedDeviceToken
+    });
+    
+    const { user, token, requiresVerification, otpRequired } = response.data;
+
+    if (requiresVerification || otpRequired) {
+      return response.data;
+    }
 
     if (typeof window !== 'undefined') {
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
     }
     setUser(user);
+    return response.data;
   };
 
   const signup = async (data: {
@@ -152,13 +179,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     employeeId?: string;
   }) => {
     const response = await authAPI.signup(data);
-    const { user, token } = response.data;
+    const { user, token, requiresVerification } = response.data;
+
+    if (requiresVerification) {
+      return response.data;
+    }
 
     if (typeof window !== 'undefined') {
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
     }
     setUser(user);
+    return response.data;
   };
 
   const logout = async () => {
@@ -201,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logout,
     refreshUser,
     setUser,
+    completeAuth,
   };
 
   return (

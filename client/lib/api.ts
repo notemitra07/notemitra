@@ -71,8 +71,17 @@ export const authAPI = {
     employeeId?: string;
   }) => api.post('/auth/signup', data),
 
-  login: (data: { email: string; password: string }) =>
+  login: (data: { email: string; password: string; deviceToken?: string }) =>
     api.post('/auth/login', data),
+
+  verifySignupCode: (data: { email: string; code: string }) =>
+    api.post('/auth/verify-signup', data),
+
+  resendSignupOtp: (data: { email: string }) =>
+    api.post('/auth/resend-signup-otp', data),
+
+  verifyLoginOtp: (data: { email: string; password?: string; code: string }) =>
+    api.post('/auth/verify-login-otp', data),
 
   logout: (refreshToken: string) =>
     api.post('/auth/logout', { refreshToken }),

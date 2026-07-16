@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/context/AuthContext';
+import { authAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Mail, Lock, User, Chrome, GraduationCap, Eye, EyeOff, Briefcase, Hash } from 'lucide-react';
+import { Mail, Lock, User, Chrome, GraduationCap, Eye, EyeOff, Briefcase, Hash, ShieldCheck } from 'lucide-react';
 
 export default function SignUpPage() {
   const router = useRouter();
-  const { signup } = useAuth();
+  const { signup, completeAuth } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -26,6 +27,23 @@ export default function SignUpPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // OTP Verification States
+  const [showVerification, setShowVerification] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationError, setVerificationError] = useState('');
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
+
+  useEffect(() => {
+    let interval: any;
+    if (resendTimer > 0) {
+      interval = setInterval(() => {
+        setResendTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [resendTimer]);
 
   const email = formData.email.trim().toLowerCase();
   const isStudent = email.endsWith('@mictech.edu.in') || email.endsWith('@mic.tech.edu');
@@ -100,8 +118,13 @@ export default function SignUpPage() {
     setLoading(true);
 
     try {
-      await signup(signupData);
-      router.push('/browse');
+      const res = await signup(signupData);
+      if (res && res.requiresVerification) {
+        setShowVerification(true);
+        setResendTimer(60);
+      } else {
+        router.push('/browse');
+      }
     } catch (err: unknown) {
       const error = err as { code?: string; message?: string; response?: { data?: { message?: string; error?: string } } };
       if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
@@ -114,6 +137,41 @@ export default function SignUpPage() {
     }
   };
 
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerificationError('');
+    if (!verificationCode || verificationCode.length !== 6) {
+      setVerificationError('Please enter a valid 6-digit code');
+      return;
+    }
+
+    setVerificationLoading(true);
+    try {
+      const response = await authAPI.verifySignupCode({
+        email: formData.email.toLowerCase().trim(),
+        code: verificationCode
+      });
+      const { user, token, deviceToken } = response.data;
+      completeAuth(user, token, deviceToken);
+      router.push('/browse');
+    } catch (err: any) {
+      setVerificationError(err.response?.data?.message || err.response?.data?.error || 'Invalid or expired code. Please try again.');
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendTimer > 0) return;
+    setVerificationError('');
+    try {
+      await authAPI.resendSignupOtp({ email: formData.email.toLowerCase().trim() });
+      setResendTimer(60);
+    } catch (err: any) {
+      setVerificationError(err.response?.data?.message || 'Failed to resend code. Please try again.');
+    }
+  };
+
   const handleGoogleSignUp = () => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
     const backendUrl = apiUrl.replace('/api', '');
@@ -122,11 +180,88 @@ export default function SignUpPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-4 py-6 sm:py-12">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-5 sm:p-8 transition-all duration-300">
-        <div className="text-center mb-5 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
-          <p className="text-sm sm:text-base text-gray-600">Join NoteMitra and start sharing knowledge</p>
-        </div>
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-5 sm:p-8 transition-all duration-300 animate-fadeIn">
+        {showVerification ? (
+          <div>
+            <div className="text-center mb-6 animate-fadeIn">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 text-blue-600 animate-pulse">
+                <ShieldCheck className="h-10 w-10" />
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Verify Your Email</h1>
+              <p className="text-sm sm:text-base text-gray-600">
+                We've sent a 6-digit verification code to <span className="font-semibold text-gray-800">{formData.email}</span>
+              </p>
+            </div>
+
+            {verificationError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-xs sm:text-sm animate-fadeIn">
+                {verificationError}
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyCode} className="space-y-5">
+              <div>
+                <label htmlFor="otp" className="block text-sm font-medium text-gray-700 mb-2 text-center font-semibold">
+                  Enter 6-Digit Verification Code
+                </label>
+                <div className="relative">
+                  <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <input
+                    id="otp"
+                    type="text"
+                    maxLength={6}
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                    required
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center font-mono text-2xl tracking-[0.5em] text-gray-800"
+                    placeholder="000000"
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base rounded-lg transition-colors"
+                disabled={verificationLoading}
+              >
+                {verificationLoading ? 'Verifying...' : 'Verify Code & Sign Up'}
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={resendTimer > 0}
+                className={`text-sm font-medium transition-colors ${
+                  resendTimer > 0 ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-700'
+                }`}
+              >
+                {resendTimer > 0 ? `Resend Code in ${resendTimer}s` : 'Resend Verification Code'}
+              </button>
+            </div>
+
+            <p className="mt-6 text-center text-sm text-gray-600">
+              Entered wrong email?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVerification(false);
+                  setVerificationCode('');
+                  setVerificationError('');
+                }}
+                className="text-blue-600 hover:text-blue-700 font-semibold"
+              >
+                Go Back
+              </button>
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="text-center mb-5 sm:mb-8">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
+              <p className="text-sm sm:text-base text-gray-600">Join NoteMitra and start sharing knowledge</p>
+            </div>
 
         {isStudent && (
           <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs sm:text-sm font-medium animate-fadeIn">
@@ -483,6 +618,8 @@ export default function SignUpPage() {
             Sign In
           </Link>
         </p>
+          </>
+        )}
       </div>
     </div>
   );

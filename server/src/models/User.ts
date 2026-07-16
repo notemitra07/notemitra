@@ -13,6 +13,11 @@ export interface IUser extends Document {
   uploadsCount: number;
   reputation: number;
   isVerified: boolean;
+  verificationCode?: string;
+  verificationCodeExpiry?: Date;
+  loginOtp?: string;
+  loginOtpExpiry?: Date;
+  verifiedDevices?: string[];
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -75,6 +80,22 @@ const userSchema = new Schema<IUser>(
     isVerified: {
       type: Boolean,
       default: false
+    },
+    verificationCode: {
+      type: String
+    },
+    verificationCodeExpiry: {
+      type: Date
+    },
+    loginOtp: {
+      type: String
+    },
+    loginOtpExpiry: {
+      type: Date
+    },
+    verifiedDevices: {
+      type: [String],
+      default: []
     }
   },
   {
