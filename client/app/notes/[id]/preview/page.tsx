@@ -94,6 +94,14 @@ export default function PDFPreviewPage() {
           fetchedNote.id = fetchedNote._id;
         }
         
+        // Track preview view on the backend
+        try {
+          const previewNoteId = fetchedNote._id || fetchedNote.id || noteId;
+          await notesAPI.trackPreview(String(previewNoteId));
+        } catch (err) {
+          console.error('Failed to track preview:', err);
+        }
+        
         // Get the PDF URL - use direct URL (works for localhost)
         let rawPdfUrl = '';
         if (fetchedNote.cloudinaryUrl) {

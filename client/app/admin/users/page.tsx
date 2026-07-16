@@ -30,7 +30,7 @@ export default function UsersManagement() {
 
   useEffect(() => {
     if (!user) {
-      router.push('/auth/signin');
+      router.push('/admin/login');
       return;
     }
 

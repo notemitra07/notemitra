@@ -292,7 +292,7 @@ export default function NoteDetailPage() {
       // Track and update local count
       try {
         await notesAPI.trackDownload(String(downloadNoteId));
-        setNote(prev => prev ? { ...prev, downloads: prev.downloads + 1 } : prev);
+        setNote(prev => prev ? { ...prev, downloads: prev.downloads + 1, views: prev.views + 1 } : prev);
       } catch {}
 
       showToast('PDF downloaded successfully!', 'success');

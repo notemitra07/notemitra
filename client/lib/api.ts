@@ -199,6 +199,8 @@ export const notesAPI = {
 
   trackDownload: (id: string) => api.post(`/notes/${id}/download`),
 
+  trackPreview: (id: string) => api.post(`/notes/${id}/preview`),
+
   deleteNote: (id: string) => api.delete(`/notes/${id}`),
 
   reportNote: (id: string, reason: string) =>
@@ -237,4 +239,10 @@ export const adminAPI = {
   getReports: () => api.get('/admin/reports'),
 
   resolveReport: (noteId: string) => api.put(`/admin/reports/${noteId}/resolve`),
+
+  changeUserRole: (userId: string, data: { role: string; isAdmin: boolean }) =>
+    api.put(`/admin/users/${userId}/role`, data),
+
+  createUser: (data: any) =>
+    api.post('/admin/users/create', data),
 };

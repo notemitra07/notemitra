@@ -22,3 +22,11 @@ This log tracks architectural and design choices made throughout the lifecycle o
 - **Date**: July 2026
 - **Rationale**: Next.js Standalone configuration (`output: 'standalone'`) is designed strictly for production build/deployment. Under development mode, this option causes file-watching mismatches and hot-reload errors. It has been excluded from the local `next.config.js`.
 - **Alternatives Considered**: Managing dev with custom build scripts.
+
+---
+
+## Decision 4: Super Admin Dashboard & College Domain Restrictions
+- **Date**: July 2026
+- **Rationale**: Students (`@mictech.edu.in`) and Faculty (`@mictech.ac.in`) logins need strictly separated roles and dashboard access. A pre-seeded Super Admin account controls user promotion/demotion and login creations. Grouping students by branch and faculty by department on the client-side allows clean administrative supervision.
+- **Alternatives Considered**: Adding role selector screens or complex multi-level permissions middleware.
+

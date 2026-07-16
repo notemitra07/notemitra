@@ -131,7 +131,9 @@ const sessionConfig = {
 };
 
 // Add MongoStore for production to avoid MemoryStore warning
-if (process.env.MONGODB_URI && !process.env.MONGODB_URI.includes('username:password')) {
+if (process.env.MONGODB_URI && 
+    (process.env.MONGODB_URI.startsWith('mongodb://') || process.env.MONGODB_URI.startsWith('mongodb+srv://')) && 
+    !process.env.MONGODB_URI.includes('username:password')) {
   sessionConfig.store = MongoStore.create({
     mongoUrl: process.env.MONGODB_URI,
     ttl: 24 * 60 * 60, // Session TTL in seconds (24 hours)
@@ -321,6 +323,23 @@ const configureGoogleAuth = () => {
       const name = profile.displayName;
       let isNewUser = false;
 
+      const isStudentEmail = email.toLowerCase().endsWith('@mictech.edu.in') || email.toLowerCase().endsWith('@mic.tech.edu');
+      const isFacultyEmail = email.toLowerCase().endsWith('@mictech.ac.in') || email.toLowerCase().endsWith('@mic.tech.ac.in');
+      
+      let normalizedRole = 'student';
+      let isAdmin = false;
+      
+      if (isStudentEmail) {
+        normalizedRole = 'student';
+        isAdmin = false;
+      } else if (isFacultyEmail) {
+        normalizedRole = 'teacher';
+        isAdmin = true;
+      } else {
+        isAdmin = ADMIN_EMAILS.includes(email.toLowerCase().trim());
+        normalizedRole = isAdmin ? 'teacher' : 'student';
+      }
+
       if (useMongoDB) {
         // MongoDB version
         let user = await User.findOne({ email });
@@ -331,7 +350,8 @@ const configureGoogleAuth = () => {
             name,
             email,
             password: 'google_oauth_' + Date.now(), // placeholder
-            role: 'student',
+            role: normalizedRole,
+            isAdmin,
             googleId: profile.id,
             // Leave branch, rollNo, section empty for new users to fill
           });
@@ -343,6 +363,7 @@ const configureGoogleAuth = () => {
           name: user.name, 
           email: user.email, 
           role: user.role, 
+          isAdmin: user.isAdmin,
           isNewUser,
           branch: user.branch,
           rollNo: user.rollNo,
@@ -356,16 +377,29 @@ const configureGoogleAuth = () => {
           isNewUser = true;
           user = {
             id: (users.length + 1).toString(),
+            _id: (users.length + 1).toString(),
             name,
             email,
-            role: 'student',
+            role: normalizedRole,
+            isAdmin,
             googleId: profile.id,
             createdAt: new Date()
           };
           users.push(user);
         }
         
-        return done(null, { ...user, isNewUser });
+        return done(null, { 
+          id: user.id,
+          _id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isAdmin: user.isAdmin,
+          isNewUser,
+          branch: user.branch,
+          rollNo: user.rollNo,
+          section: user.section
+        });
       }
     } catch (error) {
       return done(error, null);
@@ -699,16 +733,23 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 6 characters long' });
     }
     
-    // Validate role if provided
-    const validRoles = ['student', 'teacher', 'faculty'];
-    if (role && !validRoles.includes(role)) {
-      return res.status(400).json({ message: 'Invalid role. Must be student, teacher, or faculty' });
+    // Enforce role based on email domain
+    const isStudentEmail = email.toLowerCase().endsWith('@mictech.edu.in') || email.toLowerCase().endsWith('@mic.tech.edu');
+    const isFacultyEmail = email.toLowerCase().endsWith('@mictech.ac.in') || email.toLowerCase().endsWith('@mic.tech.ac.in');
+    
+    let normalizedRole = 'student';
+    let isAdmin = false;
+    
+    if (isStudentEmail) {
+      normalizedRole = 'student';
+      isAdmin = false;
+    } else if (isFacultyEmail) {
+      normalizedRole = 'teacher';
+      isAdmin = true;
+    } else {
+      normalizedRole = (role === 'teacher' || role === 'faculty') ? 'teacher' : 'student';
+      isAdmin = ADMIN_EMAILS.includes(email.toLowerCase().trim()) || normalizedRole === 'teacher';
     }
-    
-    const normalizedRole = (role === 'teacher' || role === 'faculty') ? 'teacher' : 'student';
-    
-    // Check if email is an admin
-    const isAdmin = ADMIN_EMAILS.includes(email) || normalizedRole === 'teacher';
 
     if (useMongoDB) {
       // MongoDB version - optimized with lean() and select() for faster check
@@ -1940,6 +1981,139 @@ app.delete('/api/admin/users/:userId', adminMiddleware, async (req, res) => {
   }
 });
 
+// Change user role (Super Admin only check)
+app.put('/api/admin/users/:userId/role', adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role, isAdmin } = req.body;
+    
+    // Check if the requester is the Super Admin
+    if (req.user.role !== 'superadmin' && req.user.email !== 'superadmin@notemitra.com') {
+      return res.status(403).json({ message: 'Access denied. Super Admin only.' });
+    }
+
+    if (useMongoDB) {
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      // Prevent changing super admin role
+      if (user.role === 'superadmin' || user.email === 'superadmin@notemitra.com') {
+        return res.status(400).json({ message: 'Cannot modify Super Admin role' });
+      }
+
+      user.role = role;
+      user.isAdmin = isAdmin;
+      await user.save();
+      res.json({ message: 'User role updated successfully', user });
+    } else {
+      const user = users.find(u => u.id === userId);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      if (user.role === 'superadmin' || user.email === 'superadmin@notemitra.com') {
+        return res.status(400).json({ message: 'Cannot modify Super Admin role' });
+      }
+
+      user.role = role;
+      user.isAdmin = isAdmin;
+      res.json({ message: 'User role updated successfully', user: { ...user, password: undefined } });
+    }
+  } catch (error) {
+    console.error('Change role error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Create user by Super Admin
+app.post('/api/admin/users/create', adminMiddleware, async (req, res) => {
+  try {
+    // Check if requester is Super Admin
+    if (req.user.role !== 'superadmin' && req.user.email !== 'superadmin@notemitra.com') {
+      return res.status(403).json({ message: 'Access denied. Super Admin only.' });
+    }
+
+    const {
+      name,
+      email,
+      password,
+      role,
+      branch,
+      section,
+      rollNo,
+      designation,
+      department,
+      employeeId,
+      isAdmin
+    } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Name, email, and password are required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    if (useMongoDB) {
+      const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+      if (existingUser) {
+        return res.status(400).json({ message: 'User already exists with this email' });
+      }
+
+      const user = await User.create({
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password, // saved directly as per development logic
+        role: role || 'student',
+        branch,
+        section,
+        rollNo,
+        designation,
+        department,
+        employeeId,
+        isAdmin: isAdmin || false,
+        isSuspended: false
+      });
+
+      res.status(201).json({ message: 'User created successfully', user });
+    } else {
+      const existingUser = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+      if (existingUser) {
+        return res.status(400).json({ message: 'User already exists with this email' });
+      }
+
+      const user = {
+        id: (users.length + 1).toString(),
+        _id: (users.length + 1).toString(),
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        role: role || 'student',
+        branch: branch || '',
+        section: section || '',
+        rollNo: rollNo || '',
+        designation: designation || '',
+        department: department || '',
+        employeeId: employeeId || '',
+        isAdmin: isAdmin || false,
+        isSuspended: false,
+        createdAt: new Date()
+      };
+      users.push(user);
+
+      res.status(201).json({ message: 'User created successfully', user: { ...user, password: undefined } });
+    }
+  } catch (error) {
+    console.error('Create user by admin error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 // Get all notes (admin view)
 app.get('/api/admin/notes', adminMiddleware, async (req, res) => {
   try {
@@ -2912,7 +3086,69 @@ app.get('/api/notes/:noteId/download', async (req, res) => {
   }
 });
 
-// Track note download - Only counts UNIQUE downloads per user per note
+// Track note preview - Increments views count
+app.post('/api/notes/:id/preview', async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    // Get user ID from token
+    let userId = null;
+    if (token && token.startsWith('dev_token_') && !token.includes('expired')) {
+      const userIdStr = token.replace('dev_token_', '');
+      if (mongoose.Types.ObjectId.isValid(userIdStr)) {
+        userId = userIdStr;
+      }
+    }
+
+    if (useMongoDB) {
+      // Validate ObjectId format
+      if (!mongoose.Types.ObjectId.isValid(noteId)) {
+        return res.status(400).json({ message: 'Invalid note ID format' });
+      }
+
+      const updateQuery = { $inc: { views: 1 } };
+      if (userId) {
+        updateQuery.$addToSet = { viewedBy: userId };
+      }
+
+      const note = await Note.findByIdAndUpdate(
+        noteId,
+        updateQuery,
+        { new: true }
+      ).lean();
+
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
+      }
+
+      console.log(`👁️ Preview tracked - Note: ${noteId}, User: ${userId || 'anonymous'}, Total Views: ${note.views}`);
+      res.json({ message: 'Preview tracked', views: note.views });
+    } else {
+      // In-memory version
+      const note = notes.find(n => n.id === parseInt(noteId));
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
+      }
+
+      note.views = (note.views || 0) + 1;
+      if (userId) {
+        if (!note.viewedBy) note.viewedBy = [];
+        if (!note.viewedBy.includes(userId)) {
+          note.viewedBy.push(userId);
+        }
+      }
+
+      console.log(`👁️ Preview tracked (In-memory) - Note: ${noteId}, Total Views: ${note.views}`);
+      res.json({ message: 'Preview tracked', views: note.views });
+    }
+  } catch (error) {
+    console.error('Track preview error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Track note download - Counts downloads and views every time
 app.post('/api/notes/:id/download', async (req, res) => {
   try {
     const noteId = req.params.id;
@@ -2933,31 +3169,15 @@ app.post('/api/notes/:id/download', async (req, res) => {
         return res.status(400).json({ message: 'Invalid note ID format' });
       }
 
-      // First, check if this user already downloaded this note
-      const existingNote = await Note.findById(noteId).lean();
-      
-      if (!existingNote) {
-        return res.status(404).json({ message: 'Note not found' });
-      }
-
-      // Check if user already downloaded (for logged-in users)
-      const alreadyDownloaded = userId && existingNote.downloadedBy && 
-        existingNote.downloadedBy.some(id => id.toString() === userId);
-
-      if (alreadyDownloaded) {
-        // User already downloaded this note - don't increment
-        console.log(`📥 Download tracked (already counted) - Note: ${noteId}, User: ${userId}`);
-        return res.json({ 
-          message: 'Download already tracked', 
-          downloads: existingNote.downloads,
-          alreadyCounted: true 
-        });
-      }
-
-      // New unique download - increment count and add user to downloadedBy
-      const updateQuery = { $inc: { downloads: 1 } };
+      // New download - increment downloads and views every time, and add user to downloadedBy/viewedBy sets
+      const updateQuery = { 
+        $inc: { downloads: 1, views: 1 } 
+      };
       if (userId) {
-        updateQuery.$addToSet = { downloadedBy: userId };
+        updateQuery.$addToSet = { 
+          downloadedBy: userId,
+          viewedBy: userId
+        };
       }
 
       const note = await Note.findByIdAndUpdate(
@@ -2966,7 +3186,11 @@ app.post('/api/notes/:id/download', async (req, res) => {
         { new: true }
       ).lean();
 
-      // Update uploader's totalDownloads (only for new unique downloads)
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
+      }
+
+      // Update uploader's totalDownloads
       if (note.userId) {
         await User.findByIdAndUpdate(
           note.userId,
@@ -2974,23 +3198,34 @@ app.post('/api/notes/:id/download', async (req, res) => {
         );
       }
 
-      console.log(`📥 NEW Download tracked - Note: ${noteId}, User: ${userId || 'anonymous'}, Total: ${note.downloads}`);
-      res.json({ message: 'Download tracked', downloads: note.downloads, alreadyCounted: false });
+      console.log(`📥 Download tracked - Note: ${noteId}, User: ${userId || 'anonymous'}, Total Downloads: ${note.downloads}, Total Views: ${note.views}`);
+      res.json({ message: 'Download tracked', downloads: note.downloads, views: note.views, alreadyCounted: false });
     } else {
-      // In-memory version - track downloads per user
+      // In-memory version
       const note = notes.find(n => n.id === parseInt(noteId));
-      if (note) {
-        if (!note.downloadedBy) note.downloadedBy = [];
-        
-        if (userId && note.downloadedBy.includes(userId)) {
-          // Already downloaded
-          return res.json({ message: 'Download already tracked', alreadyCounted: true });
-        }
-        
-        note.downloads = (note.downloads || 0) + 1;
-        if (userId) note.downloadedBy.push(userId);
+      if (!note) {
+        return res.status(404).json({ message: 'Note not found' });
       }
-      res.json({ message: 'Download tracked', alreadyCounted: false });
+
+      if (!note.downloadedBy) note.downloadedBy = [];
+      if (!note.viewedBy) note.viewedBy = [];
+      
+      note.downloads = (note.downloads || 0) + 1;
+      note.views = (note.views || 0) + 1;
+      if (userId) {
+        if (!note.downloadedBy.includes(userId)) note.downloadedBy.push(userId);
+        if (!note.viewedBy.includes(userId)) note.viewedBy.push(userId);
+      }
+
+      // Increment the note uploader's totalDownloads
+      const uploader = users.find(u => u.id === note.userId);
+      if (uploader) {
+        if (!uploader.totalDownloads) uploader.totalDownloads = 0;
+        uploader.totalDownloads += 1;
+      }
+
+      console.log(`📥 Download tracked (In-memory) - Note: ${noteId}, Total Downloads: ${note.downloads}, Total Views: ${note.views}`);
+      res.json({ message: 'Download tracked', downloads: note.downloads, views: note.views, alreadyCounted: false });
     }
   } catch (error) {
     console.error('Track download error:', error);
@@ -3261,34 +3496,7 @@ app.get('/api/notes/:id', async (req, res) => {
         return res.status(404).json({ message: 'Note not found with the provided ID' });
       }
 
-      // Only increment views if user hasn't viewed before (unique views)
-      let isNewView = true;
-      if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
-        const userObjectId = new mongoose.Types.ObjectId(currentUserId);
-        // Check if user already viewed
-        if (note.viewedBy && note.viewedBy.some(id => id.toString() === currentUserId)) {
-          isNewView = false;
-        }
-        
-        if (isNewView) {
-          // Add to viewedBy and increment views
-          note = await Note.findByIdAndUpdate(
-            noteId,
-            { 
-              $inc: { views: 1 },
-              $addToSet: { viewedBy: userObjectId }
-            },
-            { new: true }
-          ).lean();
-        }
-      } else {
-        // Anonymous user - still count the view (can't track without user ID)
-        note = await Note.findByIdAndUpdate(
-          noteId,
-          { $inc: { views: 1 } },
-          { new: true }
-        ).lean();
-      }
+      // Do not increment views on note details fetch. Views are tracked on download or preview.
 
       // Check if current user has liked this note
       let userLiked = false;
@@ -3335,7 +3543,7 @@ app.get('/api/notes/:id', async (req, res) => {
         return res.status(404).json({ message: 'Note not found with the provided ID' });
       }
 
-      note.views += 1;
+      // Do not increment views on note details fetch
       
       // Check if user liked (in-memory)
       let userLiked = false;
@@ -4438,42 +4646,17 @@ app.get('/api/leaderboard', async (req, res) => {
 app.get('/api/notes/:id/download', async (req, res) => {
   try {
     const noteId = req.params.id;
-    const token = req.headers.authorization?.replace('Bearer ', '');
     
-    // Get user ID from token
-    let userId = null;
-    if (token && token.startsWith('dev_token_') && !token.includes('expired')) {
-      const userIdStr = token.replace('dev_token_', '');
-      if (mongoose.Types.ObjectId.isValid(userIdStr)) {
-        userId = userIdStr;
-      }
-    }
-
     if (useMongoDB) {
-      // MongoDB version - check for unique download
+      // Validate ObjectId format
+      if (!mongoose.Types.ObjectId.isValid(noteId)) {
+        return res.status(400).json({ message: 'Invalid note ID format' });
+      }
+
       const existingNote = await Note.findById(noteId).lean();
       
       if (!existingNote) {
         return res.status(404).json({ message: 'Note not found' });
-      }
-
-      // Check if user already downloaded (for logged-in users)
-      const alreadyDownloaded = userId && existingNote.downloadedBy && 
-        existingNote.downloadedBy.some(id => id.toString() === userId);
-
-      if (!alreadyDownloaded) {
-        // New unique download - increment count
-        const updateQuery = { $inc: { downloads: 1 } };
-        if (userId) {
-          updateQuery.$addToSet = { downloadedBy: userId };
-        }
-
-        await Note.findByIdAndUpdate(noteId, updateQuery);
-
-        // Increment the note uploader's totalDownloads
-        if (existingNote.userId) {
-          await User.findByIdAndUpdate(existingNote.userId, { $inc: { totalDownloads: 1 } });
-        }
       }
 
       // If note has fileId (GridFS), provide download endpoint, otherwise use fileUrl
@@ -4488,27 +4671,11 @@ app.get('/api/notes/:id/download', async (req, res) => {
       if (!note) {
         return res.status(404).json({ message: 'Note not found' });
       }
-
-      // Check for unique download
-      if (!note.downloadedBy) note.downloadedBy = [];
-      
-      if (!userId || !note.downloadedBy.includes(userId)) {
-        note.downloads = (note.downloads || 0) + 1;
-        if (userId) note.downloadedBy.push(userId);
-
-        // Increment the note uploader's totalDownloads
-        const uploader = users.find(u => u.id === note.userId);
-        if (uploader) {
-          if (!uploader.totalDownloads) uploader.totalDownloads = 0;
-          uploader.totalDownloads += 1;
-        }
-      }
-
-      res.json({ downloadUrl: note.fileUrl || '/sample.pdf' });
+      res.json({ downloadUrl: note.fileUrl || '/sample.pdf', useGridFS: false });
     }
   } catch (error) {
-    console.error('Download error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Download link error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -4531,7 +4698,26 @@ async function startServer() {
     useMongoDB = await connectMongoDB();
     console.log('[DEBUG] MongoDB connection result:', useMongoDB);
     
-    if (!useMongoDB) {
+    if (useMongoDB) {
+      // Seed Super Admin in MongoDB
+      try {
+        const superAdminExists = await User.findOne({ email: 'superadmin@notemitra.com' });
+        if (!superAdminExists) {
+          await User.create({
+            name: 'Super Admin',
+            email: 'superadmin@notemitra.com',
+            password: 'SuperAdmin@NoteMitra2026',
+            role: 'superadmin',
+            isAdmin: true,
+            isSuspended: false,
+            createdAt: new Date()
+          });
+          console.log('✅ Super Admin account seeded in MongoDB');
+        }
+      } catch (err) {
+        console.error('❌ Failed to seed Super Admin in MongoDB:', err.message);
+      }
+    } else {
       // Add a default test user if in-memory
       users.push({
         id: 'testuser123',
@@ -4548,7 +4734,23 @@ async function startServer() {
         profilePic: '',
         createdAt: new Date()
       });
-      console.log('✅ In-memory fallback pre-populated with test user (test@example.com / password123)');
+      // Add Super Admin in-memory
+      users.push({
+        id: 'superadmin123',
+        _id: 'superadmin123',
+        name: 'Super Admin',
+        email: 'superadmin@notemitra.com',
+        password: 'SuperAdmin@NoteMitra2026',
+        role: 'superadmin',
+        isAdmin: true,
+        isSuspended: false,
+        notesUploaded: 0,
+        totalDownloads: 0,
+        totalViews: 0,
+        profilePic: '',
+        createdAt: new Date()
+      });
+      console.log('✅ In-memory fallback pre-populated with test user and Super Admin');
     }
     
     // Configure Google OAuth

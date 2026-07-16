@@ -29,6 +29,8 @@ graph TD
 - **File Upload Strategy**: PDF documents are uploaded directly to Cloudinary (for high-speed global delivery) with a seamless fallback to MongoDB GridFS in case of API rate limits or network issues.
 - **Client Auth Integration**: State is managed via `AuthContext.tsx` combined with custom axios request interceptors (`lib/api.ts`) that inject jwt tokens. Response interceptors explicitly bypass auto-redirects on 401 to prevent authorization logout loops.
 - **Standalone Mode Disabled in Development**: `output: 'standalone'` is removed from `next.config.js` in dev mode to ensure live-reloading and middleware functions run cleanly.
+- **Super Admin & Domain Routing**: Seeded `superadmin@notemitra.com` (Password: `SuperAdmin@NoteMitra2026`) as the Super Admin. Logins ending with `@mictech.edu.in` automatically resolve to Student (normal login), while `@mictech.ac.in` logins map to Faculty (admin panel access).
+
 
 ---
 

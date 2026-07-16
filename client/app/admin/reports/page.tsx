@@ -28,7 +28,7 @@ export default function ReportsManagement() {
 
   useEffect(() => {
     if (!user) {
-      router.push('/auth/signin');
+      router.push('/admin/login');
       return;
     }
 

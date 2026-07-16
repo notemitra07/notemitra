@@ -25,6 +25,7 @@ export default function SignInPage() {
     }
     const lowerEmail = email.toLowerCase();
     return (
+      lowerEmail === 'superadmin@notemitra.com' ||
       lowerEmail.endsWith('@mictech.edu.in') ||
       lowerEmail.endsWith('@mic.tech.edu') ||
       lowerEmail.endsWith('@mictech.ac.in') ||
