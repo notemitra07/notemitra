@@ -236,6 +236,7 @@ app.use(cors({
     'http://192.168.1.35:3000',
     'http://192.168.245.192:3000',
     'https://notemitra-mic.vercel.app',
+    'https://notemitra-mic2000.vercel.app',
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true
@@ -1902,7 +1903,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         await user.save();
         
         // Generate reset URL
-        const frontendUrl = process.env.FRONTEND_URL || 'https://notemitra-mic.vercel.app';
+        const frontendUrl = process.env.FRONTEND_URL || 'https://notemitra-mic2000.vercel.app';
         const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
         
         console.log('📧 Password reset requested for:', normalizedEmail);
@@ -1924,7 +1925,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         user.resetToken = resetToken;
         user.resetTokenExpiry = resetTokenExpiry;
         
-        const frontendUrl = process.env.FRONTEND_URL || 'https://notemitra-mic.vercel.app';
+        const frontendUrl = process.env.FRONTEND_URL || 'https://notemitra-mic2000.vercel.app';
         const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
         
         console.log('📧 Password reset requested for:', normalizedEmail);
