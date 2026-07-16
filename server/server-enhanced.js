@@ -974,8 +974,8 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
 
       await user.save();
 
-      // Send email
-      await sendOtpEmail(user.email, otpCode, 'signup');
+      // Send email (background)
+      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
 
       res.status(200).json({
         message: 'Verification code sent to your email',
@@ -1029,8 +1029,8 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
       user.verificationCode = otpCode;
       user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-      // Send email
-      await sendOtpEmail(user.email, otpCode, 'signup');
+      // Send email (background)
+      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
 
       res.status(200).json({
         message: 'Verification code sent to your email',
@@ -1167,7 +1167,7 @@ app.post('/api/auth/resend-signup-otp', otpLimiter, async (req, res) => {
       user.verificationCodeExpiry = expiry;
       await user.save();
       
-      await sendOtpEmail(user.email, otpCode, 'signup');
+      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
       res.status(200).json({ message: 'Verification code resent successfully' });
     } else {
       const user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
@@ -1181,7 +1181,7 @@ app.post('/api/auth/resend-signup-otp', otpLimiter, async (req, res) => {
       user.verificationCode = otpCode;
       user.verificationCodeExpiry = expiry;
 
-      await sendOtpEmail(user.email, otpCode, 'signup');
+      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
       res.status(200).json({ message: 'Verification code resent successfully' });
     }
   } catch (error) {
@@ -1277,7 +1277,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         user.verificationCode = otpCode;
         user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
         await user.save();
-        await sendOtpEmail(user.email, otpCode, 'signup');
+        sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
         return res.status(200).json({
           message: 'Please verify your account first. Verification code sent to email.',
           requiresVerification: true,
@@ -1305,7 +1305,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
       await user.save();
 
-      await sendOtpEmail(user.email, loginOtp, 'login');
+      sendOtpEmail(user.email, loginOtp, 'login').catch(err => console.error('Background email send failed:', err));
 
       return res.status(200).json({
         message: 'New device detected. OTP sent to your email.',
@@ -1343,7 +1343,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.verificationCode = otpCode;
         user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
-        await sendOtpEmail(user.email, otpCode, 'signup');
+        sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
         return res.status(200).json({
           message: 'Please verify your account first. Verification code sent to email.',
           requiresVerification: true,
@@ -1369,7 +1369,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       user.loginOtp = loginOtp;
       user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
-      await sendOtpEmail(user.email, loginOtp, 'login');
+      sendOtpEmail(user.email, loginOtp, 'login').catch(err => console.error('Background email send failed:', err));
 
       return res.status(200).json({
         message: 'New device detected. OTP sent to your email.',
