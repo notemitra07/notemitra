@@ -106,6 +106,7 @@ const sendOtpEmail = async (userEmail, otp, type = 'signup') => {
   
   console.log(`\n🔑 [DEV ONLY] Generated OTP for ${userEmail} (${type}): ${otp}\n`);
   
+  try {
     // 1. Try Brevo HTTP API (Port 443 - never blocked, allows sending to anyone once verified)
     if (process.env.BREVO_API_KEY) {
       try {
@@ -1010,109 +1011,102 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
       // MongoDB version
       let user = await User.findOne({ email: email.toLowerCase().trim() });
       if (user) {
-        if (user.isVerified) {
-          return res.status(400).json({ message: 'User already exists with this email' });
-        }
-        // User exists but is not verified, allow updating details and resending OTP
-        user.name = name.trim();
-        user.password = password;
-        user.role = normalizedRole;
-        user.branch = branch;
-        user.section = section;
-        user.rollNo = rollNo;
-        user.designation = designation;
-        user.department = department;
-        user.employeeId = employeeId;
-        user.isAdmin = isAdmin;
-      } else {
-        // Create new unverified user
-        user = new User({ 
-          name: name.trim(), 
-          email: email.toLowerCase().trim(), 
-          password, 
-          role: normalizedRole, 
-          branch, 
-          section, 
-          rollNo, 
-          designation,
-          department,
-          employeeId,
-          isAdmin, 
-          isSuspended: false,
-          isVerified: false,
-          verifiedDevices: []
-        });
+        return res.status(400).json({ message: 'User already exists with this email' });
       }
+      
+      // Create new verified user directly
+      user = new User({ 
+        name: name.trim(), 
+        email: email.toLowerCase().trim(), 
+        password, 
+        role: normalizedRole, 
+        branch, 
+        section, 
+        rollNo, 
+        designation,
+        department,
+        employeeId,
+        isAdmin, 
+        isSuspended: false,
+        isVerified: true,
+        verifiedDevices: []
+      });
 
-      // Generate 6-digit code
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      user.verificationCode = otpCode;
-      user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      // Generate a new trusted device token
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      user.verifiedDevices.push(deviceToken);
 
       await user.save();
 
-      // Send email (background)
-      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
-
+      const token = 'dev_token_' + user._id;
       res.status(200).json({
-        message: 'Verification code sent to your email',
-        requiresVerification: true,
-        email: user.email
+        message: 'Account created successfully',
+        user: { 
+          id: user._id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          rollNo: user.rollNo,
+          designation: user.designation,
+          department: user.department,
+          employeeId: user.employeeId,
+          isAdmin: user.isAdmin 
+        },
+        token,
+        deviceToken
       });
     } else {
       // In-memory version
       let user = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
       if (user) {
-        if (user.isVerified) {
-          return res.status(400).json({ message: 'User already exists with this email' });
-        }
-        // Update unverified user
-        user.name = name.trim();
-        user.password = password;
-        user.role = normalizedRole;
-        user.branch = branch || '';
-        user.section = section || '';
-        user.rollNo = rollNo || '';
-        user.designation = designation || '';
-        user.department = department || '';
-        user.employeeId = employeeId || '';
-        user.isAdmin = isAdmin;
-      } else {
-        // Create new unverified user
-        user = {
-          id: (users.length + 1).toString(),
-          _id: (users.length + 1).toString(),
-          name: name.trim(),
-          email: email.toLowerCase().trim(),
-          password,
-          role: normalizedRole,
-          branch: branch || '',
-          section: section || '',
-          rollNo: rollNo || '',
-          designation: designation || '',
-          department: department || '',
-          employeeId: employeeId || '',
-          isAdmin,
-          isSuspended: false,
-          isVerified: false,
-          verifiedDevices: [],
-          createdAt: new Date()
-        };
-        users.push(user);
+        return res.status(400).json({ message: 'User already exists with this email' });
       }
+      
+      // Create new verified user
+      user = {
+        id: (users.length + 1).toString(),
+        _id: (users.length + 1).toString(),
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        role: normalizedRole,
+        branch: branch || '',
+        section: section || '',
+        rollNo: rollNo || '',
+        designation: designation || '',
+        department: department || '',
+        employeeId: employeeId || '',
+        isAdmin,
+        isSuspended: false,
+        isVerified: true,
+        verifiedDevices: [],
+        createdAt: new Date()
+      };
+      
+      const deviceToken = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      user.verifiedDevices.push(deviceToken);
+      users.push(user);
 
-      // Generate 6-digit code
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      user.verificationCode = otpCode;
-      user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-      // Send email (background)
-      sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
-
+      const token = 'dev_token_' + user.id;
       res.status(200).json({
-        message: 'Verification code sent to your email',
-        requiresVerification: true,
-        email: user.email
+        message: 'Account created successfully',
+        user: { 
+          id: user.id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role, 
+          branch: user.branch, 
+          section: user.section, 
+          rollNo: user.rollNo,
+          designation: user.designation,
+          department: user.department,
+          employeeId: user.employeeId,
+          isAdmin: user.isAdmin 
+        },
+        token,
+        deviceToken
       });
     }
   } catch (error) {
@@ -1348,46 +1342,18 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         });
       }
 
-      // 1. Check if user is verified. If not, require signup verification
+      // If user exists but is not marked verified in DB, auto-verify them now to make it seamless
       if (!user.isVerified) {
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        user.verificationCode = otpCode;
-        user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        user.isVerified = true;
         await user.save();
-        sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
-        return res.status(200).json({
-          message: 'Please verify your account first. Verification code sent to email.',
-          requiresVerification: true,
-          email: user.email
-        });
       }
 
-      // 2. Check if device is trusted
-      const { deviceToken } = req.body;
-      const isTrusted = deviceToken && user.verifiedDevices && user.verifiedDevices.includes(deviceToken);
-      
-      if (isTrusted || user.email === 'superadmin@notemitra.com') {
-        console.log('✅ Login successful (Trusted Device / SuperAdmin) for:', user.email);
-        const token = 'dev_token_' + user._id;
-        return res.json({
-          message: 'Login successful',
-          user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
-          token
-        });
-      }
-
-      // 3. New device detected: Require OTP
-      const loginOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      user.loginOtp = loginOtp;
-      user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-      await user.save();
-
-      sendOtpEmail(user.email, loginOtp, 'login').catch(err => console.error('Background email send failed:', err));
-
-      return res.status(200).json({
-        message: 'New device detected. OTP sent to your email.',
-        otpRequired: true,
-        email: user.email
+      console.log('✅ Login successful for:', user.email);
+      const token = 'dev_token_' + user._id;
+      return res.json({
+        message: 'Login successful',
+        user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
+        token
       });
     } else {
       // In-memory version - case-insensitive email search
@@ -1415,43 +1381,16 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         });
       }
 
-      // 1. Check signup verification
+      // Auto-verify if needed
       if (!user.isVerified) {
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        user.verificationCode = otpCode;
-        user.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
-        sendOtpEmail(user.email, otpCode, 'signup').catch(err => console.error('Background email send failed:', err));
-        return res.status(200).json({
-          message: 'Please verify your account first. Verification code sent to email.',
-          requiresVerification: true,
-          email: user.email
-        });
+        user.isVerified = true;
       }
 
-      // 2. Check trusted device
-      const { deviceToken } = req.body;
-      const isTrusted = deviceToken && user.verifiedDevices && user.verifiedDevices.includes(deviceToken);
-
-      if (isTrusted || user.email === 'superadmin@notemitra.com') {
-        const token = 'dev_token_' + user.id;
-        return res.json({
-          message: 'Login successful',
-          user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
-          token
-        });
-      }
-
-      // 3. New device detected: Require OTP
-      const loginOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      user.loginOtp = loginOtp;
-      user.loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-
-      sendOtpEmail(user.email, loginOtp, 'login').catch(err => console.error('Background email send failed:', err));
-
-      return res.status(200).json({
-        message: 'New device detected. OTP sent to your email.',
-        otpRequired: true,
-        email: user.email
+      const token = 'dev_token_' + user.id;
+      return res.json({
+        message: 'Login successful',
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, branch: user.branch, section: user.section, isAdmin: user.isAdmin },
+        token
       });
     }
   } catch (error) {
