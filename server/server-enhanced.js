@@ -138,12 +138,16 @@ const sendOtpEmail = async (userEmail, otp, type = 'signup') => {
         `
       };
       
-      await gmailTransporter.sendMail(mailOptions);
-      console.log(`✅ ${type === 'signup' ? 'Signup' : 'Login'} OTP email sent via Gmail to:`, userEmail);
-      return true;
+      try {
+        await gmailTransporter.sendMail(mailOptions);
+        console.log(`✅ ${type === 'signup' ? 'Signup' : 'Login'} OTP email sent via Gmail to:`, userEmail);
+        return true;
+      } catch (gmailErr) {
+        console.error('❌ Gmail SMTP failed, attempting Resend fallback...', gmailErr.message);
+      }
     }
     
-    // Fallback to Resend if Gmail not configured
+    // Fallback to Resend if Gmail not configured or failed
     if (process.env.RESEND_API_KEY && resend) {
       await resend.emails.send({
         from: 'NoteMitra <onboarding@resend.dev>',
