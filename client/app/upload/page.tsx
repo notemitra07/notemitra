@@ -433,10 +433,10 @@ export default function UploadPage() {
                       <h3 className="font-semibold text-orange-900 text-sm sm:text-base">File Too Large</h3>
                       <p className="text-orange-700 text-xs sm:text-sm mt-1">
                         <strong className="break-all">{oversizedFileInfo.name}</strong> is {formatFileSize(oversizedFileInfo.size)}.
-                        Maximum size: <strong>10MB</strong>.
+                        Maximum allowed size: <strong>10MB</strong>.
                       </p>
                       <p className="text-orange-600 text-xs sm:text-sm mt-2">
-                        Please compress your PDF using a free online tool.
+                        Please compress your PDF on <strong>ILovePDF</strong> to bring it under 10MB. Once compressed, download the new file and select it below to upload.
                       </p>
                       <div className="mt-3 flex flex-col sm:flex-row gap-2">
                         <a
@@ -446,7 +446,7 @@ export default function UploadPage() {
                           className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-xs sm:text-sm font-medium"
                         >
                           <ExternalLink className="w-4 h-4" />
-                          Compress PDF
+                          Compress on ILovePDF ↗️
                         </a>
                         <button
                           type="button"
@@ -454,7 +454,7 @@ export default function UploadPage() {
                           className="inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-xs sm:text-sm font-medium"
                         >
                           <X className="w-4 h-4" />
-                          Clear
+                          Clear Error
                         </button>
                       </div>
                     </div>
@@ -462,7 +462,7 @@ export default function UploadPage() {
                 </div>
               )}
               
-              {!selectedFile && !fileTooLarge ? (
+              {!selectedFile ? (
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 sm:p-8 text-center hover:border-blue-400 transition-colors">
                   <input
                     type="file"
