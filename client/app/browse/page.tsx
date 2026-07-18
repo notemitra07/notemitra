@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Filter, SlidersHorizontal, Download, Eye, Heart, Calendar, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { notesAPI } from '@/lib/api';
+import { notesAPI, curriculumAPI } from '@/lib/api';
 import { CURRICULUM, BRANCHES, SEMESTERS } from '@/lib/curriculum';
 
 interface Note {
@@ -40,10 +40,26 @@ export default function BrowsePage() {
   const [selectedModule, setSelectedModule] = useState('');
   const [sortBy, setSortBy] = useState('newest');
 
+  const [curriculum, setCurriculum] = useState(CURRICULUM);
+
+  useEffect(() => {
+    const loadCurriculum = async () => {
+      try {
+        const response = await curriculumAPI.getCurriculum();
+        if (response.data) {
+          setCurriculum(response.data);
+        }
+      } catch (err) {
+        console.error('Failed to load curriculum from server:', err);
+      }
+    };
+    loadCurriculum();
+  }, []);
+
   // Get subjects based on selected branch and semester
   const getSubjects = () => {
     if (selectedBranch && selectedSemester) {
-      return CURRICULUM[selectedBranch]?.[selectedSemester] || [];
+      return curriculum[selectedBranch]?.[selectedSemester] || [];
     }
     return [];
   };

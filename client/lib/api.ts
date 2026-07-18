@@ -255,3 +255,17 @@ export const adminAPI = {
   createUser: (data: any) =>
     api.post('/admin/users/create', data),
 };
+
+// Curriculum API
+export const curriculumAPI = {
+  getCurriculum: () => api.get('/curriculum'),
+  
+  addSubject: (data: { branch: string; semester: string; subject: string }) =>
+    api.post('/admin/curriculum/subjects', data),
+
+  editSubject: (data: { branch: string; semester: string; oldSubject: string; newSubject: string }) =>
+    api.put('/admin/curriculum/subjects', data),
+
+  deleteSubject: (data: { branch: string; semester: string; subject: string }) =>
+    api.delete('/admin/curriculum/subjects', { data }),
+};

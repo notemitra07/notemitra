@@ -13,7 +13,8 @@ import {
   FileText,
   Bot,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { notesAPI } from '@/lib/api';
 
@@ -293,6 +294,20 @@ export default function PDFPreviewPage() {
           >
             <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
+          
+          {/* Open PDF Button */}
+          {pdfUrl && (
+            <a
+              href={pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium"
+              title="Open PDF in new tab"
+            >
+              <ExternalLink className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="hidden sm:inline">Open PDF</span>
+            </a>
+          )}
           
           {/* Download Button */}
           <button

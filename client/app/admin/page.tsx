@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/context/AuthContext';
-import { adminAPI } from '@/lib/api';
+import { adminAPI, curriculumAPI } from '@/lib/api';
 import { 
   Users, 
   FileText, 
@@ -47,12 +47,20 @@ export default function AdminDashboard() {
   // Super Admin states
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'faculty' | 'logins'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'faculty' | 'logins' | 'curriculum'>('overview');
   const [selectedBranch, setSelectedBranch] = useState<string>('CSE');
   const [selectedDept, setSelectedDept] = useState<string>('CSE');
   const [submittingUser, setSubmittingUser] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createSuccess, setCreateSuccess] = useState('');
+ 
+  // Curriculum management states
+  const [curriculumMap, setCurriculumMap] = useState<any>({});
+  const [currBranch, setCurrBranch] = useState<string>('Computer Science & Engineering');
+  const [currSem, setCurrSem] = useState<string>('1');
+  const [newSubjectName, setNewSubjectName] = useState<string>('');
+  const [editingSubject, setEditingSubject] = useState<{ oldName: string; newName: string } | null>(null);
+  const [loadingCurriculum, setLoadingCurriculum] = useState<boolean>(false);
 
   // Create User Form State
   const [newUser, setNewUser] = useState({
@@ -106,6 +114,74 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
       setLoadingUsers(false);
+    }
+  };
+
+  const fetchCurriculum = async () => {
+    try {
+      setLoadingCurriculum(true);
+      const response = await curriculumAPI.getCurriculum();
+      setCurriculumMap(response.data || {});
+    } catch (error) {
+      console.error('Error fetching curriculum:', error);
+    } finally {
+      setLoadingCurriculum(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'curriculum') {
+      fetchCurriculum();
+    }
+  }, [activeTab]);
+
+  const handleAddSubject = async () => {
+    if (!newSubjectName.trim()) return;
+    try {
+      await curriculumAPI.addSubject({
+        branch: currBranch,
+        semester: currSem,
+        subject: newSubjectName.trim()
+      });
+      setNewSubjectName('');
+      alert('Subject added successfully!');
+      fetchCurriculum();
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to add subject');
+    }
+  };
+
+  const handleEditSubject = async () => {
+    if (!editingSubject || !editingSubject.newName.trim()) return;
+    try {
+      await curriculumAPI.editSubject({
+        branch: currBranch,
+        semester: currSem,
+        oldSubject: editingSubject.oldName,
+        newSubject: editingSubject.newName.trim()
+      });
+      setEditingSubject(null);
+      alert('Subject updated successfully!');
+      fetchCurriculum();
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to update subject');
+    }
+  };
+
+  const handleDeleteSubject = async (subject: string) => {
+    if (!confirm(`Are you sure you want to delete "${subject}"? This will remove it from the list of subjects.`)) {
+      return;
+    }
+    try {
+      await curriculumAPI.deleteSubject({
+        branch: currBranch,
+        semester: currSem,
+        subject
+      });
+      alert('Subject deleted successfully!');
+      fetchCurriculum();
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to delete subject');
     }
   };
 
@@ -305,6 +381,14 @@ export default function AdminDashboard() {
                 }`}
               >
                 All Logins
+              </button>
+              <button
+                onClick={() => setActiveTab('curriculum')}
+                className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                  activeTab === 'curriculum' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Curriculum
               </button>
             </div>
           )}
@@ -939,6 +1023,149 @@ export default function AdminDashboard() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        )}
+ 
+        {activeTab === 'curriculum' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+              <Settings className="w-6 h-6 text-indigo-600" />
+              Curriculum & Subject Management
+            </h2>
+
+            {/* Selection Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Branch</label>
+                <select
+                  value={currBranch}
+                  onChange={(e) => setCurrBranch(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
+                >
+                  <option value="Computer Science & Engineering">Computer Science & Engineering (CSE)</option>
+                  <option value="Artificial Intelligence & Machine Learning">Artificial Intelligence & Machine Learning (AIML)</option>
+                  <option value="Artificial Intelligence & Data Science">Artificial Intelligence & Data Science (AIDS)</option>
+                  <option value="Information Technology">Information Technology (IT)</option>
+                  <option value="Electronics & Communication Engineering">Electronics & Communication Engineering (ECE)</option>
+                  <option value="Electrical & Electronics Engineering">Electrical & Electronics Engineering (EEE)</option>
+                  <option value="Civil Engineering">Civil Engineering</option>
+                  <option value="Mechanical Engineering">Mechanical Engineering</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Semester</label>
+                <select
+                  value={currSem}
+                  onChange={(e) => setCurrSem(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
+                >
+                  {['1', '2', '3', '4', '5', '6', '7', '8'].map(sem => (
+                    <option key={sem} value={sem}>Semester {sem}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Add Subject Block */}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6">
+              <h3 className="font-semibold text-gray-800 text-sm sm:text-base mb-3">Add New Subject</h3>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  placeholder="e.g. Theory of Computation"
+                  value={newSubjectName}
+                  onChange={(e) => setNewSubjectName(e.target.value)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800"
+                />
+                <button
+                  onClick={handleAddSubject}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition"
+                >
+                  Add Subject
+                </button>
+              </div>
+            </div>
+
+            {/* Subjects Table / List */}
+            {loadingCurriculum ? (
+              <div className="flex justify-center items-center py-10">
+                <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                  <span className="font-bold text-gray-700 text-sm sm:text-base">
+                    Subjects ({curriculumMap[currBranch]?.[currSem]?.length || 0})
+                  </span>
+                  <span className="text-xs text-gray-500 font-semibold">
+                    {currBranch} • Semester {currSem}
+                  </span>
+                </div>
+                
+                {(!curriculumMap[currBranch]?.[currSem] || curriculumMap[currBranch]?.[currSem]?.length === 0) ? (
+                  <div className="p-8 text-center text-gray-500 bg-white">
+                    No subjects defined for this semester. Click above to add some!
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-200 bg-white">
+                    {curriculumMap[currBranch][currSem].map((subject: string) => (
+                      <div key={subject} className="px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                        {editingSubject?.oldName === subject ? (
+                          <div className="flex-1 flex gap-2">
+                            <input
+                              type="text"
+                              value={editingSubject.newName}
+                              onChange={(e) => setEditingSubject({ ...editingSubject, newName: e.target.value })}
+                              className="flex-1 px-3 py-1.5 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 text-gray-800"
+                            />
+                            <button
+                              onClick={handleEditSubject}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingSubject(null)}
+                              className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs font-semibold"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-gray-800 font-medium text-sm sm:text-base">{subject}</span>
+                            <div className="flex gap-2">
+                              {subject !== 'Assignments' && (
+                                <>
+                                  <button
+                                    onClick={() => setEditingSubject({ oldName: subject, newName: subject })}
+                                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded font-bold transition"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteSubject(subject)}
+                                    className="text-xs bg-red-50 hover:bg-red-100 text-red-700 px-3 py-1.5 rounded font-bold transition"
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              )}
+                              {subject === 'Assignments' && (
+                                <span className="text-xs text-gray-400 font-medium italic select-none py-1.5">
+                                  Default Subject
+                                </span>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

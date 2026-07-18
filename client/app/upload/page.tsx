@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Sparkles, Loader2, Database, ExternalLink } from 'lucide-react';
-import { notesAPI } from '@/lib/api';
+import { notesAPI, curriculumAPI } from '@/lib/api';
 import api from '@/lib/api';
 import { CURRICULUM, BRANCHES, SEMESTERS } from '@/lib/curriculum';
 
@@ -36,10 +36,26 @@ export default function UploadPage() {
     tags: ''
   });
 
+  const [curriculum, setCurriculum] = useState(CURRICULUM);
+
+  useEffect(() => {
+    const loadCurriculum = async () => {
+      try {
+        const response = await curriculumAPI.getCurriculum();
+        if (response.data) {
+          setCurriculum(response.data);
+        }
+      } catch (err) {
+        console.error('Failed to load curriculum from server:', err);
+      }
+    };
+    loadCurriculum();
+  }, []);
+
   // Get subjects based on selected branch and semester
   const getSubjects = () => {
     if (formData.branch && formData.semester) {
-      return CURRICULUM[formData.branch]?.[formData.semester] || [];
+      return curriculum[formData.branch]?.[formData.semester] || [];
     }
     return [];
   };
@@ -222,6 +238,14 @@ export default function UploadPage() {
 
     if (!formData.branch) {
       errors.branch = 'Branch is required';
+    }
+
+    if (!formData.module.trim()) {
+      errors.module = 'Module is required';
+    }
+
+    if (!formData.tags.trim()) {
+      errors.tags = 'Tags are required';
     }
 
     if (!selectedFile) {
@@ -656,7 +680,7 @@ export default function UploadPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="module" className="block text-sm font-medium text-gray-700 mb-2">
-                  Module (Optional)
+                  Module *
                 </label>
                 <input
                   type="text"
@@ -665,13 +689,15 @@ export default function UploadPage() {
                   value={formData.module}
                   onChange={handleInputChange}
                   placeholder="e.g. Module 1, Unit 3"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${fieldErrors.module ? 'border-red-500' : 'border-gray-300'}`}
+                  required
                 />
+                {fieldErrors.module && <p className="text-red-500 text-sm mt-1">{fieldErrors.module}</p>}
               </div>
 
               <div>
                 <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-2">
-                  Tags (Optional)
+                  Tags *
                 </label>
                 <input
                   type="text"
@@ -680,9 +706,11 @@ export default function UploadPage() {
                   value={formData.tags}
                   onChange={handleInputChange}
                   placeholder="e.g. arrays, sorting, algorithms"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${fieldErrors.tags ? 'border-red-500' : 'border-gray-300'}`}
+                  required
                 />
                 <p className="text-xs text-gray-500 mt-1">Separate tags with commas</p>
+                {fieldErrors.tags && <p className="text-red-500 text-sm mt-1">{fieldErrors.tags}</p>}
               </div>
             </div>
           </div>
