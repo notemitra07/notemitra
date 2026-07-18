@@ -218,12 +218,12 @@ export default function LeaderboardPage() {
 
         {/* Info Card */}
         <div className="mt-6 sm:mt-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl shadow-lg p-4 sm:p-6 text-white">
-          <h3 className="text-lg sm:text-xl font-bold mb-2 sm:mb-3">📊 How Rankings Work</h3>
-          <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
-            <li>✅ <strong>Total Downloads:</strong> More downloads = higher rank</li>
-            <li>✅ <strong>Average Downloads per Note:</strong> Quality matters! (ties broken by avg)</li>
-            <li>✅ <strong>Upload Date:</strong> Earlier uploads win ties</li>
-            <li>✅ Upload clear, useful notes to gain popularity and climb the leaderboard!</li>
+          <h3 className="text-lg sm:text-xl font-bold mb-2 sm:mb-3">How Rankings Work</h3>
+          <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm list-disc pl-5">
+            <li><strong>Total Downloads:</strong> More downloads = higher rank</li>
+            <li><strong>Average Downloads per Note:</strong> Quality matters! (ties broken by avg)</li>
+            <li><strong>Upload Date:</strong> Earlier uploads win ties</li>
+            <li>Upload clear, useful notes to gain popularity and climb the leaderboard!</li>
           </ul>
         </div>
       </div>

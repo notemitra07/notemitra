@@ -115,7 +115,7 @@ export default function Navbar() {
                   Upload
                 </Link>
                 <Link href="/leaderboard" className="text-gray-700 hover:text-blue-600 transition focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1" role="menuitem">
-                  🏆 Leaderboard
+                  Leaderboard
                 </Link>
                 <Link href="/about" className="text-gray-700 hover:text-blue-600 transition focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1" role="menuitem">
                   About
@@ -211,7 +211,7 @@ export default function Navbar() {
                   onClick={closeMobileMenu}
                   role="menuitem"
                 >
-                  🏆 Leaderboard
+                  Leaderboard
                 </Link>
                 <Link
                   href="/about"
