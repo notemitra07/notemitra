@@ -36,6 +36,23 @@ export default function SignInPage() {
     return () => clearInterval(interval);
   }, [resendTimer]);
 
+  // Handle external auth errors (e.g. from Google OAuth redirect)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const errorParam = params.get('error');
+      if (errorParam) {
+        if (errorParam === 'invalid_domain') {
+          setError('Please use your MIC college domain email (@mictech.edu.in or @mictech.ac.in) to log in.');
+        } else if (errorParam === 'google_auth_failed') {
+          setError('Google authentication failed. Please try again.');
+        } else if (errorParam === 'google_not_configured') {
+          setError('Google OAuth is not configured on the server.');
+        }
+      }
+    }
+  }, []);
+
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {

@@ -537,6 +537,10 @@ const configureGoogleAuth = () => {
       const isStudentEmail = email.toLowerCase().endsWith('@mictech.edu.in') || email.toLowerCase().endsWith('@mic.tech.edu');
       const isFacultyEmail = email.toLowerCase().endsWith('@mictech.ac.in') || email.toLowerCase().endsWith('@mic.tech.ac.in');
       
+      if (!isStudentEmail && !isFacultyEmail) {
+        return done(null, false, { message: 'INVALID_DOMAIN' });
+      }
+
       let normalizedRole = 'student';
       let isAdmin = false;
       
@@ -1568,24 +1572,41 @@ app.get('/api/auth/google/callback', (req, res, next) => {
   if (!googleAuthEnabled) {
     return res.redirect('http://localhost:3000/auth/signin?error=google_not_configured');
   }
-  passport.authenticate('google', { 
-    failureRedirect: `${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/signin?error=google_auth_failed` 
+
+  passport.authenticate('google', (err, user, info) => {
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    if (err) {
+      if (err.message === 'INVALID_DOMAIN') {
+        return res.redirect(`${clientUrl}/auth/signin?error=invalid_domain`);
+      }
+      return res.redirect(`${clientUrl}/auth/signin?error=google_auth_failed`);
+    }
+    if (!user) {
+      if (info && info.message === 'INVALID_DOMAIN') {
+        return res.redirect(`${clientUrl}/auth/signin?error=invalid_domain`);
+      }
+      return res.redirect(`${clientUrl}/auth/signin?error=google_auth_failed`);
+    }
+
+    // Log the user in
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        return res.redirect(`${clientUrl}/auth/signin?error=google_auth_failed`);
+      }
+
+      const token = 'dev_token_' + user.id;
+      // Check if new user needs to complete profile
+      if (user.isNewUser || !user.branch || !user.rollNo) {
+        // Redirect to profile completion page
+        const redirectURL = `${clientUrl}/auth/google-callback?token=${token}&newUser=true&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`;
+        res.redirect(redirectURL);
+      } else {
+        // Existing user with complete profile - redirect to browse
+        const redirectURL = `${clientUrl}/auth/google-callback?token=${token}&newUser=false`;
+        res.redirect(redirectURL);
+      }
+    });
   })(req, res, next);
-}, (req, res) => {
-  // Successful authentication
-  const user = req.user;
-  const token = 'dev_token_' + user.id;
-  
-  // Check if new user needs to complete profile
-  if (user.isNewUser || !user.branch || !user.rollNo) {
-    // Redirect to profile completion page
-    const redirectURL = `${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/google-callback?token=${token}&newUser=true&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`;
-    res.redirect(redirectURL);
-  } else {
-    // Existing user with complete profile - redirect to browse
-    const redirectURL = `${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/google-callback?token=${token}&newUser=false`;
-    res.redirect(redirectURL);
-  }
 });
 
 app.get('/api/auth/me', async (req, res) => {
