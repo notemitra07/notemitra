@@ -1017,9 +1017,14 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
     } else if (isFacultyEmail) {
       normalizedRole = 'teacher';
       isAdmin = true;
+    } else if (email.toLowerCase().trim() === 'superadmin@notemitra.com') {
+      normalizedRole = 'superadmin';
+      isAdmin = true;
     } else {
-      normalizedRole = (role === 'teacher' || role === 'faculty') ? 'teacher' : 'student';
-      isAdmin = ADMIN_EMAILS.includes(email.toLowerCase().trim()) || normalizedRole === 'teacher';
+      return res.status(400).json({ 
+        message: 'Please use your MIC college domain email (@mictech.edu.in for students, @mictech.ac.in for faculty) to sign up.',
+        error: 'INVALID_EMAIL_DOMAIN'
+      });
     }
 
     if (useMongoDB) {
@@ -1574,7 +1579,7 @@ app.get('/api/auth/google/callback', (req, res, next) => {
   }
 
   passport.authenticate('google', (err, user, info) => {
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const clientUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
     if (err) {
       if (err.message === 'INVALID_DOMAIN') {
         return res.redirect(`${clientUrl}/auth/signin?error=invalid_domain`);

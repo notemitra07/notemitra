@@ -42,3 +42,10 @@ This log is used to capture critical bugs, integration issues, and troubleshooti
 - **Fix**: Changed the `/api/notes` cache header to `no-cache, no-store, must-revalidate` to ensure statistics update dynamically upon page transition.
 - **Status**: Resolved
 
+---
+
+## Issue 6: Personal Email Signup Bypass (Critical Security)
+- **Problem**: Users could sign up with any email domain (e.g., `@gmail.com`, `@yahoo.com`), bypassing the college-only restriction.
+- **Cause**: The `else` branch in the signup domain check (line ~1020 of `server-enhanced.js`) silently accepted non-college emails and assigned them the "student" role instead of rejecting them.
+- **Fix**: Changed the `else` branch to return a 400 error with `INVALID_EMAIL_DOMAIN` code and a message directing users to use their MIC college domain email. Added a special exception for `superadmin@notemitra.com`.
+- **Status**: Resolved (verified by QA test suite — 61/61 tests passing)
